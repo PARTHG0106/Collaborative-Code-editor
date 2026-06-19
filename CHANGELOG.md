@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.5.0] - 2026-06-19
+
+### Added
+
+- **Monaco Editor Integration**: Replaced fallback textarea with the official Monaco Editor component from `@monaco-editor/react`.
+- **Dynamic Syntax Highlighting**: Added lookup heuristics mapping file extensions (`.js`, `.ts`, `.py`, `.html`, `.css`, `.json`, `.md`, `.sql`, `.sh`, `.yml`) to native Monaco language types.
+- **IDE Settings Toolbar**: Added interactive header controls to toggle word wrap, show/hide code minimap, and alternate editor themes (`vs-dark` vs `light`).
+- **Vitest Mocking Strategy**: Added virtual JSDOM editor interceptors in unit test files to ensure testing suite passes successfully without DOM canvas runtime constraints.
+
 ## [0.4.0] - 2026-06-19
 
 ### Added

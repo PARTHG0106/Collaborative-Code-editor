@@ -3,8 +3,41 @@ import { useAuth } from '../context/AuthContext';
 import { 
   ArrowLeft, Users, Shield, ShieldAlert, ShieldCheck, UserPlus, 
   Trash2, LogOut, Check, X, Edit2, Loader2, Mail, Calendar,
-  Folder, File, FolderPlus, FilePlus, ChevronDown, ChevronRight, Save, Terminal, Code
+  Folder, File, FolderPlus, FilePlus, ChevronDown, ChevronRight, Save, Terminal, Code,
+  Eye, EyeOff, AlignLeft, Sun, Moon
 } from 'lucide-react';
+import Editor from '@monaco-editor/react';
+
+const getLanguageFromFilename = (filename: string): string => {
+  const ext = filename.split('.').pop()?.toLowerCase();
+  switch (ext) {
+    case 'js':
+    case 'jsx':
+      return 'javascript';
+    case 'ts':
+    case 'tsx':
+      return 'typescript';
+    case 'py':
+      return 'python';
+    case 'html':
+      return 'html';
+    case 'css':
+      return 'css';
+    case 'json':
+      return 'json';
+    case 'md':
+      return 'markdown';
+    case 'sql':
+      return 'sql';
+    case 'sh':
+      return 'shell';
+    case 'yml':
+    case 'yaml':
+      return 'yaml';
+    default:
+      return 'plaintext';
+  }
+};
 
 interface Member {
   userId: string;
@@ -74,6 +107,12 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'unsaved'>('saved');
 
+  // Monaco Editor Options State
+  const [editorLanguage, setEditorLanguage] = useState('plaintext');
+  const [wordWrap, setWordWrap] = useState<'on' | 'off'>('on');
+  const [minimap, setMinimap] = useState(true);
+  const [editorTheme, setEditorTheme] = useState<'vs-dark' | 'light'>('vs-dark');
+
   // Inline Creation / Renaming State
   const [newItemType, setNewItemType] = useState<'FILE' | 'FOLDER' | null>(null);
   const [newItemParentId, setNewItemParentId] = useState<string | null>(null);
@@ -123,12 +162,20 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
     fetchFiles();
   }, [fetchWorkspaceDetails, fetchFiles]);
 
-  // Sync scroll between textarea and line numbers
+  // Sync scroll between textarea and line numbers (fallback)
   const handleScroll = () => {
     if (textareaRef.current && lineNumbersRef.current) {
       lineNumbersRef.current.scrollTop = textareaRef.current.scrollTop;
     }
   };
+
+  const activeFile = files.find(f => f.id === activeFileId);
+
+  useEffect(() => {
+    if (activeFile) {
+      setEditorLanguage(getLanguageFromFilename(activeFile.name));
+    }
+  }, [activeFileId, activeFile?.name]);
 
   // Handle auto-clearing success messages
   useEffect(() => {
@@ -734,9 +781,37 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                 <div className="editor-header">
                   <div className="editor-active-tab">
                     <File size={14} className="text-purple-400" />
-                    <span>{files.find(f => f.id === activeFileId)?.name}</span>
+                    <span>{activeFile?.name}</span>
+                    <span className="text-xs text-gray-500 ml-2">({editorLanguage})</span>
                   </div>
+                  
                   <div className="editor-header-actions">
+                    <button 
+                      className={`explorer-action-btn ${wordWrap === 'on' ? 'text-purple-400' : ''}`}
+                      title="Toggle Word Wrap"
+                      onClick={() => setWordWrap(prev => prev === 'on' ? 'off' : 'on')}
+                    >
+                      <AlignLeft size={14} />
+                    </button>
+                    
+                    <button 
+                      className={`explorer-action-btn ${minimap ? 'text-purple-400' : ''}`}
+                      title="Toggle Minimap"
+                      onClick={() => setMinimap(prev => !prev)}
+                    >
+                      {minimap ? <Eye size={14} /> : <EyeOff size={14} />}
+                    </button>
+                    
+                    <button 
+                      className="explorer-action-btn"
+                      title="Toggle Theme"
+                      onClick={() => setEditorTheme(prev => prev === 'vs-dark' ? 'light' : 'vs-dark')}
+                    >
+                      {editorTheme === 'vs-dark' ? <Sun size={14} /> : <Moon size={14} />}
+                    </button>
+
+                    <div className="h-4 w-[1px] bg-white/10 mx-1"></div>
+
                     <span className={`save-status-indicator ${saveStatus}`}>
                       {saveStatus === 'saving' && 'Saving...'}
                       {saveStatus === 'unsaved' && 'Unsaved changes'}
@@ -754,19 +829,32 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                 </div>
 
                 <div className="editor-body">
-                  <div ref={lineNumbersRef} className="editor-line-numbers">
-                    {editorContent.split('\n').map((_, i) => (
-                      <div key={i}>{i + 1}</div>
-                    ))}
-                  </div>
-                  <textarea
-                    ref={textareaRef}
-                    className="editor-textarea"
+                  <Editor
+                    height="100%"
+                    language={editorLanguage}
+                    theme={editorTheme}
                     value={editorContent}
-                    onChange={e => setEditorContent(e.target.value)}
-                    onScroll={handleScroll}
-                    placeholder="// Start coding in this workspace..."
-                    disabled={!canModifySettings}
+                    onChange={(val) => setEditorContent(val || '')}
+                    options={{
+                      minimap: { enabled: minimap },
+                      fontSize: 14,
+                      fontFamily: "var(--font-mono), Menlo, Monaco, Consolas, monospace",
+                      lineNumbers: "on",
+                      roundedSelection: true,
+                      scrollBeyondLastLine: false,
+                      readOnly: !canModifySettings,
+                      automaticLayout: true,
+                      tabSize: 2,
+                      insertSpaces: true,
+                      wordWrap: wordWrap,
+                      padding: { top: 12 },
+                    }}
+                    loading={
+                      <div className="flex flex-col items-center justify-center h-full w-full gap-2 text-gray-500">
+                        <Loader2 className="animate-spin text-purple-500" size={24} />
+                        <span className="text-xs">Initializing Monaco Engine...</span>
+                      </div>
+                    }
                   />
                 </div>
 

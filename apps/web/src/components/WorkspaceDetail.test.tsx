@@ -21,6 +21,21 @@ vi.mock('../context/AuthContext', () => {
   };
 });
 
+// Mock Monaco Editor
+vi.mock('@monaco-editor/react', () => {
+  return {
+    default: ({ value, onChange, options }: any) => (
+      <textarea
+        placeholder="// Start coding in this workspace..."
+        data-testid="monaco-editor-mock"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={options?.readOnly}
+      />
+    ),
+  };
+});
+
 describe('WorkspaceDetail Component', () => {
   const { apiClient } = useAuth();
 
