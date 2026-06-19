@@ -7,6 +7,55 @@ import {
   Eye, EyeOff, AlignLeft, Sun, Moon
 } from 'lucide-react';
 import Editor from '@monaco-editor/react';
+import { io, Socket } from 'socket.io-client';
+
+const getRandomColorForUser = (userId: string): string => {
+  const colors = [
+    '#f43f5e', '#ec4899', '#d946ef', '#a855f7', '#8b5cf6', 
+    '#6366f1', '#3b82f6', '#0ea5e9', '#06b6d4', '#14b8a6', 
+    '#10b981', '#22c55e', '#84cc16', '#eab308', '#f97316'
+  ];
+  let hash = 0;
+  for (let i = 0; i < userId.length; i++) {
+    hash = userId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash % colors.length);
+  return colors[index];
+};
+
+const ensureUserStyle = (userId: string, name: string) => {
+  const styleId = `remote-cursor-style-${userId}`;
+  if (document.getElementById(styleId)) return;
+
+  const color = getRandomColorForUser(userId);
+  const style = document.createElement('style');
+  style.id = styleId;
+  style.innerHTML = `
+    .remote-cursor-${userId} {
+      border-left: 2px solid ${color} !important;
+      position: relative;
+    }
+    .remote-cursor-${userId}::after {
+      content: "${name}";
+      position: absolute;
+      top: -16px;
+      left: 0;
+      background: ${color};
+      color: #fff;
+      font-size: 8px;
+      line-height: 10px;
+      padding: 1px 4px;
+      border-radius: 2px;
+      white-space: nowrap;
+      pointer-events: none;
+      z-index: 1000;
+      font-family: sans-serif;
+      font-weight: 600;
+      opacity: 0.85;
+    }
+  `;
+  document.head.appendChild(style);
+};
 
 const getLanguageFromFilename = (filename: string): string => {
   const ext = filename.split('.').pop()?.toLowerCase();
@@ -113,6 +162,16 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
   const [minimap, setMinimap] = useState(true);
   const [editorTheme, setEditorTheme] = useState<'vs-dark' | 'light'>('vs-dark');
 
+  // Collaborative Socket.IO State & Refs
+  const [activeCollaborators, setActiveCollaborators] = useState<Array<{ id: string, name: string, email: string }>>([]);
+  const socketRef = useRef<Socket | null>(null);
+  const editorRef = useRef<any>(null);
+  const monacoRef = useRef<any>(null);
+  const serverVersionRef = useRef<number>(0);
+  const localVersionRef = useRef<number>(0);
+  const isApplyingRemoteEditRef = useRef<boolean>(false);
+  const remoteDecorationsRef = useRef<Map<string, string[]>>(new Map());
+
   // Inline Creation / Renaming State
   const [newItemType, setNewItemType] = useState<'FILE' | 'FOLDER' | null>(null);
   const [newItemParentId, setNewItemParentId] = useState<string | null>(null);
@@ -176,6 +235,179 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
       setEditorLanguage(getLanguageFromFilename(activeFile.name));
     }
   }, [activeFileId, activeFile?.name]);
+
+  // Connect and join workspace room
+  useEffect(() => {
+    const token = localStorage.getItem('accessToken');
+    const socket = io('http://localhost:4000', {
+      auth: { token }
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      console.info('🔌 Connected to Socket.IO Server');
+      socket.emit('join_workspace', { workspaceId });
+    });
+
+    socket.on('workspace_users', (users: Array<{ id: string, name: string, email: string }>) => {
+      setActiveCollaborators(users);
+
+      const currentMemberIds = new Set(users.map(u => u.id));
+      remoteDecorationsRef.current.forEach((decorations, userId) => {
+        if (!currentMemberIds.has(userId) && editorRef.current) {
+          editorRef.current.deltaDecorations(decorations, []);
+          remoteDecorationsRef.current.delete(userId);
+        }
+      });
+    });
+
+    socket.on('error', (errMsg: string) => {
+      console.error('Socket error:', errMsg);
+      setError(errMsg);
+    });
+
+    return () => {
+      socket.emit('leave_workspace', { workspaceId });
+      socket.disconnect();
+    };
+  }, [workspaceId]);
+
+  // Synchronize active file room
+  useEffect(() => {
+    if (!socketRef.current || !activeFileId) return;
+    const socket = socketRef.current;
+
+    socket.emit('join_file', { fileId: activeFileId });
+
+    socket.on('file_init', ({ content, version }: { content: string, version: number }) => {
+      setEditorContent(content);
+      serverVersionRef.current = version;
+      localVersionRef.current = version;
+    });
+
+    socket.on('file_edit_ack', ({ version }: { version: number }) => {
+      serverVersionRef.current = version;
+      setSaveStatus('saved');
+    });
+
+    socket.on('file_edit', ({ fileId, edit, version, userId }: { fileId: string, edit: any, version: number, userId: string }) => {
+      if (fileId !== activeFileId) return;
+      serverVersionRef.current = version;
+      localVersionRef.current = version;
+
+      const editorInstance = editorRef.current;
+      if (editorInstance && monacoRef.current) {
+        const model = editorInstance.getModel();
+        if (model) {
+          isApplyingRemoteEditRef.current = true;
+
+          const start = model.getPositionAt(edit.offset);
+          const end = model.getPositionAt(edit.offset + edit.length);
+          const range = new monacoRef.current.Range(
+            start.lineNumber, start.column, end.lineNumber, end.column
+          );
+
+          model.pushEditOperations(
+            [],
+            [{
+              range,
+              text: edit.text,
+              forceMoveMarkers: true
+            }],
+            () => null
+          );
+
+          isApplyingRemoteEditRef.current = false;
+        }
+      }
+    });
+
+    socket.on('cursor_update', ({ userId, name, email, cursor }: { userId: string, name: string, email: string, cursor: any }) => {
+      ensureUserStyle(userId, name);
+
+      const editorInstance = editorRef.current;
+      if (editorInstance && monacoRef.current) {
+        const model = editorInstance.getModel();
+        if (model) {
+          const prevDecorations = remoteDecorationsRef.current.get(userId) || [];
+          const start = model.getPositionAt(cursor.offset);
+          const range = new monacoRef.current.Range(
+            start.lineNumber, start.column, start.lineNumber, start.column
+          );
+
+          const newDecorations = editorInstance.deltaDecorations(prevDecorations, [
+            {
+              range,
+              options: {
+                className: `remote-cursor remote-cursor-${userId}`,
+                hoverMessage: { value: `${name} (${email})` }
+              }
+            }
+          ]);
+          remoteDecorationsRef.current.set(userId, newDecorations);
+        }
+      }
+    });
+
+    return () => {
+      socket.emit('leave_file', { fileId: activeFileId });
+      socket.off('file_init');
+      socket.off('file_edit_ack');
+      socket.off('file_edit');
+      socket.off('cursor_update');
+      
+      if (editorRef.current) {
+        remoteDecorationsRef.current.forEach((decorations) => {
+          editorRef.current.deltaDecorations(decorations, []);
+        });
+      }
+      remoteDecorationsRef.current.clear();
+    };
+  }, [activeFileId]);
+
+  const handleEditorDidMount = (editor: any, monaco: any) => {
+    editorRef.current = editor;
+    monacoRef.current = monaco;
+
+    editor.onDidChangeModelContent((event: any) => {
+      if (isApplyingRemoteEditRef.current) return;
+
+      event.changes.forEach((change: any) => {
+        const { rangeOffset, rangeLength, text } = change;
+        if (socketRef.current && activeFileId) {
+          socketRef.current.emit('edit_file', {
+            fileId: activeFileId,
+            baseVersion: localVersionRef.current,
+            edit: {
+              offset: rangeOffset,
+              text,
+              length: rangeLength
+            }
+          });
+          localVersionRef.current += 1;
+          setSaveStatus('unsaved');
+        }
+      });
+    });
+
+    editor.onDidChangeCursorPosition((event: any) => {
+      if (socketRef.current && activeFileId) {
+        const position = event.position;
+        const model = editor.getModel();
+        if (model) {
+          const offset = model.getOffsetAt(position);
+          socketRef.current.emit('cursor_move', {
+            fileId: activeFileId,
+            cursor: {
+              lineNumber: position.lineNumber,
+              column: position.column,
+              offset
+            }
+          });
+        }
+      }
+    });
+  };
 
   // Handle auto-clearing success messages
   useEffect(() => {
@@ -654,6 +886,21 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
           <span>Workspaces</span>
         </button>
 
+        {/* Presence indicators */}
+        <div className="flex items-center gap-1.5 ml-auto mr-4 animate-fade-in">
+          <span className="text-xs text-gray-500 font-medium mr-1">Active:</span>
+          {activeCollaborators.map(c => (
+            <div 
+              key={c.id} 
+              className="w-7 h-7 rounded-full text-white flex items-center justify-center text-xs font-semibold shadow-sm border border-white/10"
+              style={{ backgroundColor: getRandomColorForUser(c.id) }}
+              title={`${c.name} (${c.email})`}
+            >
+              {c.name.charAt(0).toUpperCase()}
+            </div>
+          ))}
+        </div>
+
         <div className="workspace-meta-actions">
           {isOwner && (
             <button className="btn btn-danger btn-icon" onClick={handleDeleteWorkspace} disabled={actionLoading}>
@@ -835,6 +1082,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                     theme={editorTheme}
                     value={editorContent}
                     onChange={(val) => setEditorContent(val || '')}
+                    onMount={handleEditorDidMount}
                     options={{
                       minimap: { enabled: minimap },
                       fontSize: 14,

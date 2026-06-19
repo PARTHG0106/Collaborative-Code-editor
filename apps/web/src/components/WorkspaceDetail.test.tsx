@@ -21,6 +21,20 @@ vi.mock('../context/AuthContext', () => {
   };
 });
 
+// Mock socket.io-client
+vi.mock('socket.io-client', () => {
+  const mockSocket = {
+    on: vi.fn(),
+    off: vi.fn(),
+    emit: vi.fn(),
+    disconnect: vi.fn(),
+  };
+  return {
+    io: () => mockSocket,
+    default: () => mockSocket,
+  };
+});
+
 // Mock Monaco Editor
 vi.mock('@monaco-editor/react', () => {
   return {

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.7.0] - 2026-06-19
+
+### Added
+
+- **Operational Transformation (OT) Conflict Resolution**: Built a custom OT engine on the server to transform concurrent text insertions and deletions against server edit histories.
+- **Monaco Cursor Delta Decorator Integration**: Implemented a dynamic decoration manager mapping text changes directly into the Monaco editor models using `pushEditOperations` to maintain local editor markers.
+
+## [0.6.0] - 2026-06-19
+
+### Added
+
+- **Socket.IO Real-Time Infrastructure**: Wrapped server in a native HTTP server and configured `socket.io` for bi-directional communication with custom JWT verification handshake middleware.
+- **Active Workspace Presence**: Added a presence bar showing active user avatar bubbles currently visiting the workspace.
+- **Collaborator Cursor Synchronization**: Broadcasted user cursor ranges in real-time and injected custom dynamic stylesheets rendering colored cursors with labels.
+
 ## [0.5.0] - 2026-06-19
 
 ### Added

@@ -1,6 +1,8 @@
+import { createServer } from 'http';
 import { createApp } from './app.js';
 import { config, validateConfig } from './config/index.js';
 import prisma from './lib/prisma.js';
+import { initSocketServer } from './socket.js';
 
 /**
  * Server entry point.
@@ -19,7 +21,12 @@ async function main(): Promise<void> {
     // Create and start Express app
     const app = createApp();
 
-    const server = app.listen(config.port, () => {
+    // Integrate HTTP Server with Socket.IO
+    const server = createServer(app);
+    initSocketServer(server);
+    console.info('🔌 Socket.IO server initialized');
+
+    server.listen(config.port, () => {
       console.info(`
   ╔══════════════════════════════════════════════╗
   ║   Collaborative Code Editor API Server       ║
