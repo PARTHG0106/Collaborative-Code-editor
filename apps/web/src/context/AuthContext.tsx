@@ -14,6 +14,8 @@ interface AuthContextType {
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
+  verifyEmail: (email: string, code: string) => Promise<void>;
+  resendVerification: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
   apiClient: AxiosInstance;
@@ -146,7 +148,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (err: any) {
       const errMsg = err.response?.data?.error?.message || 'Login failed';
+      const errCode = err.response?.data?.error?.code;
       setError(errMsg);
+      if (errCode === 'EMAIL_NOT_VERIFIED') {
+        const customErr = new Error(errMsg);
+        (customErr as any).code = 'EMAIL_NOT_VERIFIED';
+        throw customErr;
+      }
       throw new Error(errMsg);
     } finally {
       setLoading(false);
@@ -157,13 +165,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setError(null);
     setLoading(true);
     try {
-      const response = await apiClient.post('/auth/register', { email, password, name });
-      if (response.data && response.data.success) {
-        // Auto-login after registration
-        await login(email, password);
-      }
+      await apiClient.post('/auth/register', { email, password, name });
     } catch (err: any) {
       const errMsg = err.response?.data?.error?.message || 'Registration failed';
+      setError(errMsg);
+      throw new Error(errMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyEmail = async (email: string, code: string) => {
+    setError(null);
+    setLoading(true);
+    try {
+      const response = await apiClient.post('/auth/verify', { email, code });
+      if (response.data && response.data.success) {
+        const { accessToken: token, user: userData } = response.data.data;
+        setAccessToken(token);
+        setUser(userData);
+      }
+    } catch (err: any) {
+      const errMsg = err.response?.data?.error?.message || 'Verification failed';
+      setError(errMsg);
+      throw new Error(errMsg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendVerification = async (email: string) => {
+    setError(null);
+    setLoading(true);
+    try {
+      await apiClient.post('/auth/resend-verification', { email });
+    } catch (err: any) {
+      const errMsg = err.response?.data?.error?.message || 'Resending code failed';
       setError(errMsg);
       throw new Error(errMsg);
     } finally {
@@ -194,6 +231,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         error,
         login,
         register,
+        verifyEmail,
+        resendVerification,
         logout,
         clearError,
         apiClient,

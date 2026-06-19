@@ -5,6 +5,7 @@ import { z } from 'zod';
 import prisma from '../lib/prisma.js';
 import { config } from '../config/index.js';
 import { requireAuth, AuthRequest, TokenPayload } from '../middleware/auth.js';
+import { sendEmail } from '../utils/mailer.js';
 
 const router = Router();
 
@@ -18,6 +19,15 @@ const registerSchema = z.object({
 const loginSchema = z.object({
   email: z.string().email('Invalid email address'),
   password: z.string().min(1, 'Password is required'),
+});
+
+const verifySchema = z.object({
+  email: z.string().email('Invalid email address'),
+  code: z.string().length(6, 'Verification code must be exactly 6 digits'),
+});
+
+const resendSchema = z.object({
+  email: z.string().email('Invalid email address'),
 });
 
 const refreshSchema = z.object({
@@ -88,18 +98,35 @@ router.post('/register', async (req: Request, res: Response) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
 
+    // Generate 6-digit verification code
+    const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
+    const verificationExpires = new Date(Date.now() + 3600000); // 1 hour
+
     const user = await prisma.user.create({
       data: {
         email,
         passwordHash,
         name,
+        isVerified: false,
+        verificationToken,
+        verificationExpires,
       },
       select: {
         id: true,
         email: true,
         name: true,
+        isVerified: true,
         createdAt: true,
       },
+    });
+
+    // Send verification email asynchronously
+    sendEmail({
+      to: email,
+      subject: 'Verify your Collaborative Code Editor account',
+      text: `Hello ${name},\n\nWelcome to Collaborative Code Editor! To verify your account, please enter the following 6-digit code on the verification page:\n\n${verificationToken}\n\nThis code will expire in 1 hour.\n\nHappy Coding!\nThe Collab Team`,
+    }).catch((err) => {
+      console.error('Failed to send registration verification email:', err);
     });
 
     res.status(201).json({
@@ -160,6 +187,18 @@ router.post('/login', async (req: Request, res: Response) => {
         error: {
           message: 'Invalid email or password',
           statusCode: 401,
+        },
+      });
+    }
+
+    if (!user.isVerified) {
+      return res.status(403).json({
+        success: false,
+        error: {
+          message: 'Email address is not verified',
+          statusCode: 403,
+          code: 'EMAIL_NOT_VERIFIED',
+          email: user.email,
         },
       });
     }
@@ -404,6 +443,206 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
       success: false,
       error: {
         message: 'Internal server error retrieving user profile',
+        statusCode: 500,
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/auth/verify
+ * Verifies email with 6-digit code and logs user in.
+ */
+router.post('/verify', async (req: Request, res: Response) => {
+  try {
+    const { email, code } = verifySchema.parse(req.body);
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'User not found',
+          statusCode: 400,
+        },
+      });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Email address is already verified',
+          statusCode: 400,
+        },
+      });
+    }
+
+    if (user.verificationToken !== code) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Invalid verification code',
+          statusCode: 400,
+        },
+      });
+    }
+
+    if (user.verificationExpires && user.verificationExpires < new Date()) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Verification code has expired',
+          statusCode: 400,
+        },
+      });
+    }
+
+    // Mark as verified
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        isVerified: true,
+        verificationToken: null,
+        verificationExpires: null,
+      },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        createdAt: true,
+      },
+    });
+
+    // Generate tokens to log them in directly
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user.id);
+
+    // Calculate refresh token expiry
+    const expiresAt = new Date();
+    let days = 7;
+    const match = config.jwt.refreshExpiry.match(/^(\d+)d$/);
+    if (match) days = parseInt(match[1], 10);
+    expiresAt.setDate(expiresAt.getDate() + days);
+
+    // Save refresh token to database
+    await prisma.refreshToken.create({
+      data: {
+        token: refreshToken,
+        userId: user.id,
+        expiresAt,
+      },
+    });
+
+    setRefreshTokenCookie(res, refreshToken);
+
+    res.json({
+      success: true,
+      data: {
+        accessToken,
+        user: updatedUser,
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Validation failed',
+          statusCode: 400,
+          details: error.errors,
+        },
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: {
+        message: 'Internal server error during verification',
+        statusCode: 500,
+      },
+    });
+  }
+});
+
+/**
+ * POST /api/auth/resend-verification
+ * Generates and resends a new verification code.
+ */
+router.post('/resend-verification', async (req: Request, res: Response) => {
+  try {
+    const { email } = resendSchema.parse(req.body);
+
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'User not found',
+          statusCode: 400,
+        },
+      });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Email address is already verified',
+          statusCode: 400,
+        },
+      });
+    }
+
+    // Generate new 6-digit code
+    const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
+    const verificationExpires = new Date(Date.now() + 3600000); // 1 hour
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        verificationToken,
+        verificationExpires,
+      },
+    });
+
+    // Send code
+    sendEmail({
+      to: email,
+      subject: 'Verify your Collaborative Code Editor account',
+      text: `Hello ${user.name},\n\nYour new verification code is:\n\n${verificationToken}\n\nThis code will expire in 1 hour.\n\nHappy Coding!\nThe Collab Team`,
+    }).catch((err) => {
+      console.error('Failed to send resend-verification email:', err);
+    });
+
+    res.json({
+      success: true,
+      data: {
+        message: 'Verification code resent successfully',
+      },
+    });
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return res.status(400).json({
+        success: false,
+        error: {
+          message: 'Validation failed',
+          statusCode: 400,
+          details: error.errors,
+        },
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: {
+        message: 'Internal server error during code resend',
         statusCode: 500,
       },
     });

@@ -49,7 +49,7 @@ export const Register: React.FC = () => {
 
     try {
       await register(email, password, name);
-      navigate('/dashboard', { replace: true });
+      navigate(`/verify-email?email=${encodeURIComponent(email)}`, { replace: true });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : 'Registration failed';
       setLocalError(errMsg);

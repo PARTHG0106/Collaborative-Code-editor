@@ -13,6 +13,7 @@ vi.mock('../lib/prisma.js', () => {
       user: {
         findUnique: vi.fn(),
         create: vi.fn(),
+        update: vi.fn(),
       },
       refreshToken: {
         create: vi.fn(),
@@ -110,6 +111,7 @@ describe('Auth Routes', () => {
         email: loginData.email,
         name: 'Test User',
         passwordHash,
+        isVerified: true,
       };
 
       vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as any);
@@ -142,6 +144,7 @@ describe('Auth Routes', () => {
         email: loginData.email,
         name: 'Test User',
         passwordHash,
+        isVerified: true,
       };
 
       vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as any);
@@ -271,6 +274,105 @@ describe('Auth Routes', () => {
 
       expect(response.status).toBe(401);
       expect(response.body.success).toBe(false);
+    });
+  });
+
+  describe('Email Verification Flows', () => {
+    it('should fail login if email is not verified', async () => {
+      const loginData = {
+        email: 'unverified@example.com',
+        password: 'password123',
+      };
+
+      const passwordHash = await bcrypt.hash(loginData.password, 6);
+      const mockUser = {
+        id: 'user-id-123',
+        email: loginData.email,
+        name: 'Unverified User',
+        passwordHash,
+        isVerified: false,
+      };
+
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as any);
+
+      const response = await request(app)
+        .post('/api/auth/login')
+        .send(loginData);
+
+      expect(response.status).toBe(403);
+      expect(response.body.success).toBe(false);
+      expect(response.body.error.code).toBe('EMAIL_NOT_VERIFIED');
+    });
+
+    it('should fail verify with invalid code', async () => {
+      const mockUser = {
+        id: 'user-id-123',
+        email: 'test@example.com',
+        isVerified: false,
+        verificationToken: '123456',
+        verificationExpires: new Date(Date.now() + 3600000),
+      };
+
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as any);
+
+      const response = await request(app)
+        .post('/api/auth/verify')
+        .send({ email: 'test@example.com', code: '000000' });
+
+      expect(response.status).toBe(400);
+      expect(response.body.success).toBe(false);
+      expect(response.body.error.message).toContain('Invalid verification code');
+    });
+
+    it('should verify email successfully with valid code', async () => {
+      const mockUser = {
+        id: 'user-id-123',
+        email: 'test@example.com',
+        isVerified: false,
+        verificationToken: '123456',
+        verificationExpires: new Date(Date.now() + 3600000),
+      };
+
+      const updatedUser = {
+        id: 'user-id-123',
+        email: 'test@example.com',
+        name: 'Test User',
+        isVerified: true,
+        createdAt: new Date(),
+      };
+
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as any);
+      vi.mocked(prisma.user.update).mockResolvedValue(updatedUser as any);
+      vi.mocked(prisma.refreshToken.create).mockResolvedValue({} as any);
+
+      const response = await request(app)
+        .post('/api/auth/verify')
+        .send({ email: 'test@example.com', code: '123456' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.accessToken).toBeDefined();
+      expect(response.body.data.user.email).toBe('test@example.com');
+    });
+
+    it('should resend verification code successfully', async () => {
+      const mockUser = {
+        id: 'user-id-123',
+        email: 'test@example.com',
+        name: 'Test User',
+        isVerified: false,
+      };
+
+      vi.mocked(prisma.user.findUnique).mockResolvedValue(mockUser as any);
+      vi.mocked(prisma.user.update).mockResolvedValue({} as any);
+
+      const response = await request(app)
+        .post('/api/auth/resend-verification')
+        .send({ email: 'test@example.com' });
+
+      expect(response.status).toBe(200);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.message).toContain('resent successfully');
     });
   });
 });

@@ -50,8 +50,11 @@ export const Login: React.FC = () => {
     try {
       await login(email, password);
       navigate(from, { replace: true });
-    } catch (err: unknown) {
-      // Error is set in AuthContext and synced, but we can also display localError
+    } catch (err: any) {
+      if (err.code === 'EMAIL_NOT_VERIFIED') {
+        navigate(`/verify-email?email=${encodeURIComponent(email)}`, { replace: true });
+        return;
+      }
       const errMsg = err instanceof Error ? err.message : 'Invalid credentials';
       setLocalError(errMsg);
     } finally {
