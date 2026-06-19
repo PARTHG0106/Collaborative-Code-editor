@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.4.0] - 2026-06-19
+
+### Added
+
+- **File System Database Model**: Added `FileSystemItem` model and `FileSystemItemType` enum supporting hierarchical trees, parent relationships, and CASCADE deletion.
+- **File System REST API**: Exposed `/api/workspaces/:workspaceId/files` CRUD endpoints to create, fetch, update content/name, and delete items.
+- **Tabbed IDE Dashboard**: Restructured the frontend workspace console with custom tab views separating the primary Code Editor workspace from Settings/Collaborators control panels.
+- **File Tree Sidebar**: Developed an interactive directory explorer component rendering recursively with folder chevron toggles, inline name creators, and actions to rename or delete nodes.
+- **Scroll-Synced Editor Pane**: Built a dark code workspace consisting of a sidebar showing scroll-synchronized line numbers alongside a monospace font textarea.
+- **Debounced Auto-Saving**: Implemented a frontend timer to automatically commit file edits to the database after 1.5 seconds of inactivity.
+- **Vitest Suites**: Added 10 backend integration tests and 4 frontend tree-navigation tests.
+
 ## [0.3.0] - 2026-06-19
 
 ### Added

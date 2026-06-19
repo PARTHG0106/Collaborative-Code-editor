@@ -51,12 +51,13 @@ enum WorkspaceRole {
 }
 
 model Workspace {
-  id          String            @id @default(cuid())
-  name        String
-  description String?
-  createdAt   DateTime          @default(now()) @map("created_at")
-  updatedAt   DateTime          @updatedAt @map("updated_at")
-  members     WorkspaceMember[]
+  id              String            @id @default(cuid())
+  name            String
+  description     String?
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+  members         WorkspaceMember[]
+  fileSystemItems FileSystemItem[]
 
   @@map("workspaces")
 }
@@ -73,3 +74,26 @@ model WorkspaceMember {
   @@unique([workspaceId, userId])
   @@map("workspace_members")
 }
+
+enum FileSystemItemType {
+  FILE
+  FOLDER
+}
+
+model FileSystemItem {
+  id          String             @id @default(cuid())
+  name        String
+  type        FileSystemItemType
+  content     String?            // Null for folders, text for files
+  parentId    String?            @map("parent_id")
+  parent      FileSystemItem?    @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children    FileSystemItem[]   @relation("FolderHierarchy")
+  workspaceId String             @map("workspace_id")
+  workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, parentId, name])
+  @@map("file_system_items")
+}
+

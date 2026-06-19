@@ -8,6 +8,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import workspaceRoutes from './routes/workspace.js';
+import fileRoutes from './routes/file.js';
 
 /**
  * Creates and configures the Express application.
@@ -51,6 +52,7 @@ export function createApp(): express.Application {
   app.use('/api/health', healthRoutes);
   app.use('/api/auth', authRoutes);
   app.use('/api/workspaces', workspaceRoutes);
+  app.use('/api/workspaces/:workspaceId/files', fileRoutes);
 
   // Root route
   app.get('/api', (_req, res) => {
