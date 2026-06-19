@@ -905,6 +905,10 @@
   border: 1px dashed rgba(255, 255, 255, 0.05);
 }
 
+.empty-workspaces-state button {
+  margin-top: 1.25rem;
+}
+
 .empty-icon {
   color: var(--text-muted);
   opacity: 0.4;
