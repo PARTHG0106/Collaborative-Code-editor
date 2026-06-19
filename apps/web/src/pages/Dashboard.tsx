@@ -114,7 +114,6 @@ export const Dashboard: React.FC = () => {
         <div className="brand">
           <div className="brand-logo">&lt;/&gt;</div>
           <span className="brand-name">SyncScript</span>
-          <span className="badge-phase">Phase 3: Workspaces Active</span>
         </div>
         <div className="header-actions">
           <div className="user-profile-summary">

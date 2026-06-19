@@ -84,7 +84,7 @@ export const Landing: React.FC = () => {
         <section className="hero-section">
           <div className="badge-announcement">
             <Sparkles size={14} className="badge-icon" />
-            <span>Phase 2 Live: Access & Refresh Token Authentication</span>
+            <span>Production Ready: Real-time collaborative workspace environment active!</span>
           </div>
           
           <h1 className="hero-title">

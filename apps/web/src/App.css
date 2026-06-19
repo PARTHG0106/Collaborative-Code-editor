@@ -773,10 +773,9 @@
 
 .profile-item {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
 }
 
 .profile-item .label {
@@ -786,10 +785,13 @@
   font-weight: 500;
   color: var(--text-secondary);
   text-transform: none;
+  flex: 0 0 140px;
 }
 
 .profile-item .value {
   font-weight: 600;
+  text-align: left;
+  word-break: break-all;
 }
 
 /* Coming Soon Overlay Card */
