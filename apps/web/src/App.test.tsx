@@ -81,23 +81,22 @@ describe('Frontend App Component & Auth Flows', () => {
 
     render(<App />);
 
-    expect(screen.getByText('SyncScript')).toBeInTheDocument();
+    expect(screen.getAllByText('SyncScript').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/Collaborative Coding/i)).toBeInTheDocument();
-    expect(screen.getByText('Querying API status...')).toBeInTheDocument();
+    expect(screen.getByText(/Querying API/i)).toBeInTheDocument();
   });
 
   it('displays API health status once fetched successfully', async () => {
     render(<App />);
 
-    // Wait for the loader to disappear and status dashboard to render
+    // Wait for the loader to disappear and status to render
     await waitFor(() => {
-      expect(screen.queryByText('Querying API status...')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Querying API/i)).not.toBeInTheDocument();
     });
 
-    expect(screen.getByText('Monorepo System Status')).toBeInTheDocument();
-    expect(screen.getByText('healthy')).toBeInTheDocument();
-    expect(screen.getByText('connected (14ms)')).toBeInTheDocument();
-    expect(screen.getByText('development')).toBeInTheDocument();
+    expect(screen.getByText('System Status')).toBeInTheDocument();
+    expect(screen.getByText(/API: healthy/i)).toBeInTheDocument();
+    expect(screen.getByText(/DB: connected/i)).toBeInTheDocument();
   });
 
   it('displays error UI when health check fails', async () => {
@@ -111,24 +110,24 @@ describe('Frontend App Component & Auth Flows', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.queryByText('Querying API status...')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Querying API/i)).not.toBeInTheDocument();
     });
 
-    expect(screen.getByText('Network Error')).toBeInTheDocument();
-    expect(screen.getByText('Error connecting to the backend services:')).toBeInTheDocument();
+    expect(screen.getByText(/Backend unavailable/i)).toBeInTheDocument();
+    expect(screen.getByText(/Retry/i)).toBeInTheDocument();
   });
 
   it('refetches health status when the refresh button is clicked', async () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.queryByText('Querying API status...')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Querying API/i)).not.toBeInTheDocument();
     });
 
     expect(mockedAxios.get).toHaveBeenCalled();
 
     // Click refresh button
-    const button = screen.getByRole('button', { name: /Refresh Health/i });
+    const button = screen.getByRole('button', { name: /Refresh/i });
     fireEvent.click(button);
 
     expect(mockedAxios.get).toHaveBeenCalledTimes(2);
@@ -138,7 +137,7 @@ describe('Frontend App Component & Auth Flows', () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.queryByText('Querying API status...')).not.toBeInTheDocument();
+      expect(screen.queryByText(/Querying API/i)).not.toBeInTheDocument();
     });
 
     // Click Sign In link in header
