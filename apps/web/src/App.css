@@ -1467,4 +1467,84 @@
   max-width: 400px;
 }
 
+/* Premium Form Controls for Workspaces & Forms */
+.form-group input,
+.form-group textarea,
+.edit-workspace-form input,
+.edit-workspace-form textarea {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-family: var(--font-sans);
+  transition: var(--transition-fast);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.form-group input::placeholder,
+.form-group textarea::placeholder {
+  color: rgba(255, 255, 255, 0.3);
+}
+
+.form-group input:focus,
+.form-group textarea:focus,
+.edit-workspace-form input:focus,
+.edit-workspace-form textarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.15);
+}
+
+/* Styles for invite email input */
+.input-with-icon {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-icon .input-icon {
+  position: absolute;
+  left: 1rem;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: var(--transition-fast);
+}
+
+.input-with-icon input {
+  width: 100%;
+  padding: 0.75rem 1rem 0.75rem 2.75rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 0.95rem;
+  font-family: var(--font-sans);
+  transition: var(--transition-fast);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.input-with-icon input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: 0 0 15px rgba(168, 85, 247, 0.15);
+}
+
+.input-with-icon input:focus + .input-icon {
+  color: var(--accent-primary);
+}
+
+.role-select-invite option,
+.role-dropdown option {
+  background: #12131a;
+  color: #ffffff;
+}
+
+
 
