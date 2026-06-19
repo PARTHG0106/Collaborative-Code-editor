@@ -1,43 +1,16 @@
 import '@testing-library/jest-dom';
 
-// Polyfill IntersectionObserver for framer-motion whileInView
-class MockIntersectionObserver {
+class IntersectionObserverMock {
   readonly root: Element | null = null;
   readonly rootMargin: string = '';
   readonly thresholds: ReadonlyArray<number> = [];
-  observe() {}
-  unobserve() {}
+  
+  constructor() {}
+  
   disconnect() {}
-  takeRecords(): IntersectionObserverEntry[] { return []; }
+  observe() {}
+  takeRecords() { return []; }
+  unobserve() {}
 }
 
-Object.defineProperty(window, 'IntersectionObserver', {
-  writable: true,
-  configurable: true,
-  value: MockIntersectionObserver,
-});
-
-Object.defineProperty(global, 'IntersectionObserver', {
-  writable: true,
-  configurable: true,
-  value: MockIntersectionObserver,
-});
-
-// Polyfill ResizeObserver (sometimes needed by motion)
-class MockResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-
-Object.defineProperty(window, 'ResizeObserver', {
-  writable: true,
-  configurable: true,
-  value: MockResizeObserver,
-});
-
-Object.defineProperty(global, 'ResizeObserver', {
-  writable: true,
-  configurable: true,
-  value: MockResizeObserver,
-});
+global.IntersectionObserver = IntersectionObserverMock as any;
