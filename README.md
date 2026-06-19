@@ -12,19 +12,12 @@ SyncScript is a high-performance, production-grade collaborative real-time code 
 - **Containerization**: Out-of-the-box local developer service configurations using Docker Compose.
 - **Testing Suite**: In-memory unit and integration tests configured with Vitest, React Testing Library, and Supertest.
 
-### Phase 2: Secure JWT Authentication
+### Phase 2: Secure JWT Authentication (Current)
 - **Token Rotation Engine**: Implements short-lived Access Tokens (JWT) and long-lived Refresh Tokens (stored in secure HTTP-Only, SameSite cookies).
 - **Replay Attack Mitigation**: Stores and verifies refresh tokens in the database, matching them on reuse, and rotating them during transparent token renewals.
 - **Silent Refresh Interceptor**: Standardizes API calls via a dedicated Axios client that hooks into `401 Unauthorized` errors and fetches a new session automatically without disrupting the client state.
 - **Secure Route Guards**: Redirects unauthenticated traffic away from private views like `/dashboard` back to `/login` using React Router.
 - **Responsive Auth Views**: Beautiful, interactive login and registration forms featuring responsive input layouts, status spinners, and error banners.
-
-### Phase 3: Collaborative Workspace Management (Current)
-- **Role-Based Permissions**: Implements hierarchical control system with `OWNER`, `EDITOR`, and `VIEWER` tiers validating API endpoint calls.
-- **CRUD Operations**: Complete backend endpoints and frontend interfaces for creating, reading, updating, and deleting workspaces.
-- **Visual Selector dropdown**: Seamless switching between multiple workspaces via a professional developer-style selector widget.
-- **Collaboration Overlays**: Dialog layouts allowing administrators to invite colleagues (generating copyable invitation links), revoke pending requests, update membership access levels, and enable users to leave workspaces.
-- **Invite Accept Routing**: Automatic pathing at `/invite/accept` that guides anonymous users through login/registration prompts before completing join operations.
 
 ---
 

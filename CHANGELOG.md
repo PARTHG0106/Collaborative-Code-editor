@@ -11,14 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Workspace Database Models**: Added `Workspace`, `WorkspaceMember` (with role enum), and `WorkspaceInvitation` tables to Prisma schema.
-- **Workspace REST Routing**: Implemented full CRUD, role promotion, collaborator removal, and invitation management endpoints under `/api/workspaces`.
-- **Role Validation Middleware**: Created workspace membership and privilege level checking guards (`requireWorkspaceRole`).
-- **Global Workspace State**: Implemented `WorkspaceContext` in React to handle state syncing, automatic default selection, and API actions.
-- **Dropdown Workspace Selector**: Developed a premium developer-style dropdown menu supporting workspace switching and new workspace creation.
-- **Collaboration Settings Modals**: Built tabbed General Settings (rename, deletion, leave) and Member Management (revoke invites, role promotion, member deletion) overlays.
-- **Invite Token Acceptance Router**: Created `/invite/accept` path handling anonymous redirect bounds, authorization states, and invite acceptance links.
-- **System Integration Tests**: Wrote Vitest suites for Express workspace routers (7 test specs) and React context restoration (1 integration spec), achieving 28 passing specs.
+- **Workspace Database Model**: Expanded Prisma schema with `Workspace` and `WorkspaceMember` models supporting role-based access control enum roles: `OWNER`, `EDITOR`, `VIEWER`.
+- **Workspace REST API Endpoints**: Implemented workspace CRUD operations (`GET /workspaces`, `POST /workspaces`, `GET /workspaces/:id`, `PATCH /workspaces/:id`, `DELETE /workspaces/:id`).
+- **Workspace Membership Endpoints**: Implemented invite/remove membership controls (`POST /workspaces/:id/members`, `DELETE /workspaces/:id/members/:userId`) and self-leave action (`DELETE /workspaces/:id/members/:userId`).
+- **Authorization Guard Middlewares**: Created `requireWorkspaceMember` middleware to ensure membership and check permission level (`OWNER`, `EDITOR`, `VIEWER`) prior to invoking route handlers.
+- **Glassmorphic Workspaces Dashboard**: Created a beautiful frontend workspaces interface supporting workspace listing, loading indicators, empty states, and modal creators.
+- **WorkspaceDetail Management Console**: Developed a workspace settings panel allowing users to edit workspace name/description, view and update members' roles, invite members by email, and leave/delete the workspace.
+- **Vitest Unit and API Tests**: Added 15 backend API integration tests for workspace operations and 4 frontend Dashboard unit tests covering lists, modals, and detail navigations.
 
 ## [0.2.0] - 2026-06-19
 

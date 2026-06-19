@@ -7,7 +7,7 @@ import { config } from './config/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
-import workspaceRoutes from './routes/workspaces.js';
+import workspaceRoutes from './routes/workspace.js';
 
 /**
  * Creates and configures the Express application.

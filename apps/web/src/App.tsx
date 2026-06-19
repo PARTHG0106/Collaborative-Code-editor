@@ -1,12 +1,10 @@
 import React from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
-import { WorkspaceProvider } from './context/WorkspaceContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Register from './pages/Register';
-import InviteAccept from './pages/InviteAccept';
 import Dashboard from './pages/Dashboard';
 import './App.css';
 
@@ -14,13 +12,11 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <WorkspaceProvider>
-          <Routes>
-            {/* Public Routes */}
-            <Route path="/" element={<Landing />} />
-            <Route path="/login" element={<Login />} />
-            <Route path="/register" element={<Register />} />
-            <Route path="/invite/accept" element={<InviteAccept />} />
+        <Routes>
+          {/* Public Routes */}
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
 
           {/* Protected Routes */}
           <Route
@@ -32,9 +28,8 @@ function App() {
             }
           />
         </Routes>
-      </WorkspaceProvider>
-    </AuthProvider>
-  </BrowserRouter>
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
 

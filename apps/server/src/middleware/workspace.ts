@@ -1,92 +1,69 @@
 import { Response, NextFunction } from 'express';
 import { prisma } from '../lib/prisma.js';
 import { AuthRequest } from './auth.js';
-import { WorkspaceRole } from '@prisma/client';
 
 export interface WorkspaceRequest extends AuthRequest {
-  workspace?: {
-    id: string;
-    name: string;
-    description: string | null;
-  };
   workspaceMember?: {
     id: string;
-    role: WorkspaceRole;
+    role: 'OWNER' | 'EDITOR' | 'VIEWER';
+    workspaceId: string;
   };
 }
 
 /**
- * Middleware to require that the authenticated user is a member of the workspace
- * and possesses one of the allowed roles.
- * Expects workspaceId to be passed in route parameters as :workspaceId (or optionally body/query).
+ * Middleware to enforce membership and role-based permissions in a workspace.
+ * Requires requireAuth to be run first.
+ * 
+ * @param roles Array of allowed roles (e.g. ['OWNER', 'EDITOR'])
  */
-export function requireWorkspaceRole(allowedRoles: WorkspaceRole[]) {
+export function requireWorkspaceRole(roles: ('OWNER' | 'EDITOR' | 'VIEWER')[]) {
   return async (req: WorkspaceRequest, res: Response, next: NextFunction) => {
-    const workspaceId = req.params.workspaceId || req.body.workspaceId || req.query.workspaceId;
-
-    if (!workspaceId || typeof workspaceId !== 'string') {
-      return res.status(400).json({
-        success: false,
-        error: {
-          message: 'Workspace ID is missing or invalid',
-          statusCode: 400,
-        },
-      });
-    }
-
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        error: {
-          message: 'Authentication required',
-          statusCode: 401,
-        },
-      });
-    }
-
     try {
+      const userId = req.user?.id;
+      // Look for workspace ID in request parameters
+      const workspaceId = req.params.workspaceId || req.params.id;
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          error: { message: 'Authentication required' },
+        });
+      }
+
+      if (!workspaceId) {
+        return res.status(400).json({
+          success: false,
+          error: { message: 'Workspace ID parameter is missing' },
+        });
+      }
+
       const member = await prisma.workspaceMember.findUnique({
         where: {
           workspaceId_userId: {
             workspaceId,
-            userId: req.user.id,
+            userId,
           },
-        },
-        include: {
-          workspace: true,
         },
       });
 
       if (!member) {
         return res.status(403).json({
           success: false,
-          error: {
-            message: 'You are not a member of this workspace',
-            statusCode: 403,
-          },
+          error: { message: 'You are not a member of this workspace' },
         });
       }
 
-      if (!allowedRoles.includes(member.role)) {
+      if (!roles.includes(member.role)) {
         return res.status(403).json({
           success: false,
-          error: {
-            message: 'Insufficient permissions within this workspace',
-            statusCode: 403,
-          },
+          error: { message: 'You do not have permission to perform this action' },
         });
       }
-
-      // Attach workspace details to request for downstream routes
-      req.workspace = {
-        id: member.workspace.id,
-        name: member.workspace.name,
-        description: member.workspace.description,
-      };
 
       req.workspaceMember = {
         id: member.id,
         role: member.role,
+        workspaceId: member.workspaceId,
       };
 
       next();

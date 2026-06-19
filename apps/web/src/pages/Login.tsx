@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation, Link, useSearchParams } from 'react-router-dom';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Mail, Lock, ShieldAlert, ArrowRight } from 'lucide-react';
 
@@ -18,12 +18,10 @@ export const Login: React.FC = () => {
   const { login, user, error, clearError } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
 
   // Route to redirect to after successful login
-  const redirectParam = searchParams.get('redirect');
   const state = location.state as LocationState | null;
-  const from = state?.from?.pathname || redirectParam || '/dashboard';
+  const from = state?.from?.pathname || '/dashboard';
 
   // Clear errors when the component mounts or values change
   useEffect(() => {
@@ -31,12 +29,12 @@ export const Login: React.FC = () => {
     setLocalError(null);
   }, [email, password, clearError]);
 
-  // If already logged in, redirect straight to dashboard or redirect param
+  // If already logged in, redirect straight to dashboard
   useEffect(() => {
     if (user) {
-      navigate(from, { replace: true });
+      navigate('/dashboard', { replace: true });
     }
-  }, [user, navigate, from]);
+  }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

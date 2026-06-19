@@ -20,15 +20,14 @@ model HealthCheck {
 }
 
 model User {
-  id              String                @id @default(cuid())
-  email           String                @unique
-  passwordHash    String                @map("password_hash")
-  name            String
-  createdAt       DateTime              @default(now()) @map("created_at")
-  updatedAt       DateTime              @updatedAt @map("updated_at")
-  refreshTokens   RefreshToken[]
-  memberships     WorkspaceMember[]
-  sentInvitations WorkspaceInvitation[] @relation("invitations_sent")
+  id            String            @id @default(cuid())
+  email         String            @unique
+  passwordHash  String            @map("password_hash")
+  name          String
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  refreshTokens RefreshToken[]
+  workspaces    WorkspaceMember[]
 
   @@map("users")
 }
@@ -52,13 +51,12 @@ enum WorkspaceRole {
 }
 
 model Workspace {
-  id          String                @id @default(cuid())
+  id          String            @id @default(cuid())
   name        String
   description String?
-  createdAt   DateTime              @default(now()) @map("created_at")
-  updatedAt   DateTime              @updatedAt @map("updated_at")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
   members     WorkspaceMember[]
-  invitations WorkspaceInvitation[]
 
   @@map("workspaces")
 }
@@ -70,27 +68,8 @@ model WorkspaceMember {
   userId      String        @map("user_id")
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   role        WorkspaceRole @default(VIEWER)
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
+  joinedAt    DateTime      @default(now()) @map("joined_at")
 
   @@unique([workspaceId, userId])
   @@map("workspace_members")
 }
-
-model WorkspaceInvitation {
-  id          String        @id @default(cuid())
-  workspaceId String        @map("workspace_id")
-  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  email       String
-  role        WorkspaceRole @default(VIEWER)
-  token       String        @unique
-  invitedById String        @map("invited_by_id")
-  invitedBy   User          @relation("invitations_sent", fields: [invitedById], references: [id], onDelete: Cascade)
-  status      String        @default("PENDING") // PENDING, ACCEPTED, REJECTED, CANCELLED
-  expiresAt   DateTime      @map("expires_at")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
-
-  @@map("workspace_invitations")
-}
-

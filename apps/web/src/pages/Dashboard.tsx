@@ -1,15 +1,59 @@
-import React, { useState } from 'react';
-import { useAuth } from '../context/AuthContext.js';
-import { useWorkspaces } from '../context/WorkspaceContext.js';
-import { WorkspaceSelector } from '../components/workspaces/WorkspaceSelector.js';
-import { WorkspaceSettingsModal } from '../components/workspaces/WorkspaceSettingsModal.js';
-import { LogOut, User, FolderGit2, Mail, KeyRound, Sparkles, Settings, Users, Shield, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { WorkspaceDetail } from '../components/WorkspaceDetail';
+import { 
+  LogOut, User, FolderGit2, Mail, KeyRound, Sparkles, 
+  Plus, Users, ArrowRight, ShieldCheck, Shield, ShieldAlert,
+  X, Loader2
+} from 'lucide-react';
+
+interface Workspace {
+  id: string;
+  name: string;
+  description: string | null;
+  role: 'OWNER' | 'EDITOR' | 'VIEWER';
+  memberCount: number;
+  joinedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 export const Dashboard: React.FC = () => {
-  const { user, logout } = useAuth();
-  const { currentWorkspace, loading } = useWorkspaces();
+  const { user, logout, apiClient } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Workspaces state
+  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
+  const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+
+  // Workspace creation modal state
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [newWorkspaceName, setNewWorkspaceName] = useState('');
+  const [newWorkspaceDesc, setNewWorkspaceDesc] = useState('');
+  const [createLoading, setCreateLoading] = useState(false);
+
+  // Fetch workspaces
+  const fetchWorkspaces = useCallback(async () => {
+    if (!user) return;
+    try {
+      setLoadingWorkspaces(true);
+      setDashboardError(null);
+      const res = await apiClient.get('/workspaces');
+      if (res && res.data && res.data.success) {
+        setWorkspaces(res.data.data);
+      }
+    } catch (err: any) {
+      setDashboardError(err.response?.data?.error?.message || 'Failed to fetch workspaces');
+    } finally {
+      setLoadingWorkspaces(false);
+    }
+  }, [user, apiClient]);
+
+  useEffect(() => {
+    fetchWorkspaces();
+  }, [fetchWorkspaces]);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -22,6 +66,42 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  // Create Workspace handler
+  const handleCreateWorkspace = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newWorkspaceName.trim()) return;
+
+    setCreateLoading(true);
+    setDashboardError(null);
+    try {
+      const res = await apiClient.post('/workspaces', {
+        name: newWorkspaceName,
+        description: newWorkspaceDesc || null,
+      });
+
+      if (res.data && res.data.success) {
+        setWorkspaces((prev) => [res.data.data, ...prev]);
+        setIsCreateModalOpen(false);
+        setNewWorkspaceName('');
+        setNewWorkspaceDesc('');
+        // Instantly focus the newly created workspace
+        setActiveWorkspaceId(res.data.data.id);
+      }
+    } catch (err: any) {
+      setDashboardError(err.response?.data?.error?.message || 'Failed to create workspace');
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
+  const getRoleIcon = (role: 'OWNER' | 'EDITOR' | 'VIEWER') => {
+    switch (role) {
+      case 'OWNER': return <ShieldCheck className="text-purple-400" size={14} />;
+      case 'EDITOR': return <Shield className="text-blue-400" size={14} />;
+      case 'VIEWER': return <ShieldAlert className="text-gray-400" size={14} />;
+    }
+  };
+
   if (!user) return null;
 
   return (
@@ -30,16 +110,11 @@ export const Dashboard: React.FC = () => {
       <div className="glow-orb orb-1"></div>
       <div className="glow-orb orb-2"></div>
 
-      <header className="dashboard-header glass-card flex items-center justify-between">
-        <div className="brand flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="brand-logo">&lt;/&gt;</div>
-            <span className="brand-name font-sans">SyncScript</span>
-          </div>
+      <header className="dashboard-header glass-card">
+        <div className="brand">
+          <div className="brand-logo">&lt;/&gt;</div>
+          <span className="brand-name">SyncScript</span>
           <span className="badge-phase">Phase 3: Workspaces Active</span>
-          
-          {/* Workspace dropdown selector */}
-          <WorkspaceSelector onOpenSettings={() => setIsSettingsOpen(true)} />
         </div>
         <div className="header-actions">
           <div className="user-profile-summary">
@@ -59,106 +134,190 @@ export const Dashboard: React.FC = () => {
       </header>
 
       <main className="dashboard-main">
-        <section className="welcome-banner glass-card">
-          <div className="banner-content">
-            <h1 className="banner-title">
-              Welcome back, <span className="gradient-text">{user.name}</span>!
-            </h1>
-            <p className="banner-subtitle">
-              Manage your workspaces, invite collaborators, and prepare your coding environments.
-            </p>
+        {/* Error notification */}
+        {dashboardError && (
+          <div className="alert alert-danger glass-card">
+            <X className="alert-close" onClick={() => setDashboardError(null)} size={16} />
+            <span>{dashboardError}</span>
           </div>
-          <div className="banner-icon">
-            <Sparkles size={48} className="sparkle-icon" />
-          </div>
-        </section>
+        )}
 
-        {loading ? (
-          <div className="flex justify-center items-center py-12">
-            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-zinc-200"></div>
-          </div>
-        ) : currentWorkspace ? (
-          <div className="dashboard-grid">
-            {/* Active Workspace Info Panel */}
-            <section className="dashboard-card glass-card">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="card-title-dashboard flex items-center gap-2">
-                  <FolderGit2 size={20} className="card-icon text-zinc-400" />
-                  <span>Workspace Details</span>
-                </h2>
-                <button
-                  onClick={() => setIsSettingsOpen(true)}
-                  className="p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100 transition-colors"
-                  title="Workspace Settings"
-                >
-                  <Settings size={18} />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-lg font-bold text-zinc-100">{currentWorkspace.name}</h3>
-                  <p className="text-sm text-zinc-400 mt-1">
-                    {currentWorkspace.description || 'No description provided.'}
-                  </p>
-                </div>
-
-                <div className="border-t border-zinc-900 pt-4 space-y-2 text-sm text-zinc-300">
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Your Access Role:</span>
-                    <span className="font-semibold flex items-center gap-1">
-                      <Shield size={14} className="text-zinc-400" />
-                      {currentWorkspace.role}
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-zinc-500">Total Members:</span>
-                    <span className="font-semibold flex items-center gap-1">
-                      <Users size={14} className="text-zinc-400" />
-                      {currentWorkspace.members?.length || 1}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Project / Files (Coming Soon Placeholder) */}
-            <section className="dashboard-card glass-card coming-soon-card">
-              <div className="card-content-overlay">
-                <FolderGit2 size={48} className="coming-soon-icon text-zinc-650" />
-                <h2 className="card-title-dashboard-center">Files & Live Editor</h2>
-                <p className="card-subtitle-dashboard-center">
-                  Create code files, organize directories, and start coding in real-time.
-                </p>
-                <div className="badge-coming-soon">Coming in Phase 4</div>
-              </div>
-            </section>
-          </div>
+        {activeWorkspaceId ? (
+          /* Render Workspace Details View */
+          <WorkspaceDetail 
+            workspaceId={activeWorkspaceId} 
+            onBack={() => {
+              setActiveWorkspaceId(null);
+              fetchWorkspaces();
+            }}
+            onWorkspaceDeleted={() => {
+              setActiveWorkspaceId(null);
+              fetchWorkspaces();
+            }}
+          />
         ) : (
-          /* Empty State: Create or Select Workspace */
-          <section className="glass-card flex flex-col items-center justify-center p-12 text-center max-w-xl mx-auto mt-6 border border-dashed border-zinc-800 bg-zinc-950/20">
-            <FolderGit2 size={48} className="text-zinc-600 mb-4" />
-            <h2 className="text-xl font-bold text-zinc-200">No Workspace Selected</h2>
-            <p className="text-sm text-zinc-400 max-w-sm mt-2">
-              Select an existing workspace from the dropdown above or create a new workspace to start editing code with your team.
-            </p>
-            <div className="mt-6 flex items-center gap-2 text-xs text-zinc-500">
-              <span>Use the selector at the top left</span>
-              <ArrowRight size={12} className="animate-pulse" />
+          /* Render General Dashboard and Grid View */
+          <>
+            <section className="welcome-banner glass-card">
+              <div className="banner-content">
+                <h1 className="banner-title">
+                  Welcome back, <span className="gradient-text">{user.name}</span>!
+                </h1>
+                <p className="banner-subtitle">
+                  Secure real-time collaborative development. Select a workspace or create a new one to get started.
+                </p>
+              </div>
+              <div className="banner-icon">
+                <Sparkles size={48} className="sparkle-icon" />
+              </div>
+            </section>
+
+            <div className="dashboard-sections-layout">
+              {/* Left Column: Workspaces List */}
+              <section className="workspaces-section glass-card">
+                <div className="section-header-dashboard">
+                  <div className="title-with-icon">
+                    <FolderGit2 className="card-icon" size={22} />
+                    <h2>Your Workspaces</h2>
+                  </div>
+                  <button 
+                    className="btn btn-primary btn-icon btn-sm" 
+                    onClick={() => setIsCreateModalOpen(true)}
+                  >
+                    <Plus size={16} />
+                    <span>New Workspace</span>
+                  </button>
+                </div>
+
+                {loadingWorkspaces ? (
+                  <div className="workspaces-loading-state">
+                    <Loader2 className="animate-spin text-purple-500" size={24} />
+                    <p>Loading workspaces...</p>
+                  </div>
+                ) : workspaces.length === 0 ? (
+                  <div className="empty-workspaces-state">
+                    <FolderGit2 size={40} className="empty-icon" />
+                    <h3>No Workspaces Yet</h3>
+                    <p>Create a workspace to begin coding, or have a teammate invite you by email.</p>
+                    <button className="btn btn-secondary btn-icon mt-4" onClick={() => setIsCreateModalOpen(true)}>
+                      <Plus size={16} />
+                      <span>Create Workspace</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="workspaces-grid">
+                    {workspaces.map((ws) => (
+                      <div 
+                        key={ws.id} 
+                        className="workspace-item-card"
+                        onClick={() => setActiveWorkspaceId(ws.id)}
+                      >
+                        <div className="card-meta">
+                          <span className="role-badge">
+                            {getRoleIcon(ws.role)}
+                            <span>{ws.role}</span>
+                          </span>
+                          <span className="member-count-badge">
+                            <Users size={12} />
+                            <span>{ws.memberCount}</span>
+                          </span>
+                        </div>
+                        <h3 className="workspace-name-card">{ws.name}</h3>
+                        <p className="workspace-desc-card">
+                          {ws.description || 'No description provided.'}
+                        </p>
+                        <div className="card-arrow-action">
+                          <span>Open Environment</span>
+                          <ArrowRight size={14} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              {/* Right Column: User Profile details */}
+              <section className="dashboard-card glass-card">
+                <h2 className="card-title-dashboard">
+                  <User size={20} className="card-icon" />
+                  <span>Profile Overview</span>
+                </h2>
+                <div className="profile-details">
+                  <div className="profile-item">
+                    <span className="label">
+                      <KeyRound size={16} /> User ID
+                    </span>
+                    <span className="value code-text">{user.id}</span>
+                  </div>
+                  <div className="profile-item">
+                    <span className="label">
+                      <Mail size={16} /> Email
+                    </span>
+                    <span className="value">{user.email}</span>
+                  </div>
+                  <div className="profile-item">
+                    <span className="label">
+                      <User size={16} /> Full Name
+                    </span>
+                    <span className="value">{user.name}</span>
+                  </div>
+                </div>
+              </section>
             </div>
-          </section>
+          </>
         )}
       </main>
 
-      <footer className="dashboard-footer">
-        <p>&copy; {new Date().getFullYear()} SyncScript. Real-Time Collaborative Workspace Engine.</p>
-      </footer>
+      {/* Create Workspace Modal */}
+      {isCreateModalOpen && (
+        <div className="modal-backdrop">
+          <div className="modal-content glass-card">
+            <div className="modal-header">
+              <h2>New Workspace Environment</h2>
+              <button className="close-btn" onClick={() => setIsCreateModalOpen(false)}>
+                <X size={20} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleCreateWorkspace} className="modal-form">
+              <div className="form-group">
+                <label htmlFor="wsName">Workspace Name</label>
+                <input 
+                  id="wsName"
+                  type="text" 
+                  placeholder="e.g. Main Editor Project" 
+                  value={newWorkspaceName} 
+                  onChange={e => setNewWorkspaceName(e.target.value)} 
+                  required 
+                  autoFocus
+                />
+              </div>
+              <div className="form-group">
+                <label htmlFor="wsDesc">Description (Optional)</label>
+                <textarea 
+                  id="wsDesc"
+                  placeholder="Briefly describe this project..." 
+                  value={newWorkspaceDesc} 
+                  onChange={e => setNewWorkspaceDesc(e.target.value)} 
+                  rows={4}
+                />
+              </div>
+              <div className="form-actions">
+                <button type="submit" className="btn btn-primary" disabled={createLoading}>
+                  {createLoading ? 'Creating...' : 'Create Workspace'}
+                </button>
+                <button type="button" className="btn btn-secondary" onClick={() => setIsCreateModalOpen(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
-      {/* Settings Modal */}
-      <WorkspaceSettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-      />
+      <footer className="dashboard-footer">
+        <p>&copy; {new Date().getFullYear()} SyncScript. Secured with JSON Web Token Rotation.</p>
+      </footer>
     </div>
   );
 };
