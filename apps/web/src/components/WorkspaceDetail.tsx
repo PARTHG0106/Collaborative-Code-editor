@@ -197,6 +197,96 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
 
+  // Right Sidebar Ref Sync to avoid stale callbacks
+  const rightSidebarTabRef = useRef<string | null>(null);
+  useEffect(() => {
+    rightSidebarTabRef.current = rightSidebarTab;
+    if (rightSidebarTab === 'chat') {
+      setUnreadMessages(0);
+    }
+  }, [rightSidebarTab]);
+
+  // Fetch paginated workspace chat history
+  const fetchChatHistory = useCallback(async () => {
+    try {
+      const res = await apiClient.get(`/workspaces/${workspaceId}/chat`);
+      if (res.data && res.data.success) {
+        setChatMessages(res.data.data.messages);
+      }
+    } catch (err) {
+      console.error('Failed to load chat history:', err);
+    }
+  }, [workspaceId, apiClient]);
+
+  useEffect(() => {
+    fetchChatHistory();
+  }, [fetchChatHistory]);
+
+  // Scroll to bottom of chat
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, rightSidebarTab]);
+
+  // Send message
+  const handleSendChatMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    const socket = socketRef.current;
+    if (!chatInput.trim() || !socket) return;
+
+    socket.emit('chat_message', {
+      workspaceId,
+      message: chatInput.trim()
+    });
+    setChatInput('');
+
+    if (isTypingRef.current) {
+      isTypingRef.current = false;
+      socket.emit('typing_status', { workspaceId, isTyping: false });
+    }
+  };
+
+  // Typing status change
+  const handleChatInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setChatInput(e.target.value);
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    if (!isTypingRef.current) {
+      isTypingRef.current = true;
+      socket.emit('typing_status', { workspaceId, isTyping: true });
+    }
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      isTypingRef.current = false;
+      socket.emit('typing_status', { workspaceId, isTyping: false });
+    }, 2000);
+  };
+
+  // Fetch Version history checkpoints for the active file
+  const fetchFileVersions = useCallback(async () => {
+    if (!activeFileId) return;
+    try {
+      setFileVersionsLoading(true);
+      const res = await apiClient.get(`/workspaces/${workspaceId}/files/${activeFileId}/versions`);
+      if (res.data && res.data.success) {
+        setFileVersions(res.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load versions:', err);
+    } finally {
+      setFileVersionsLoading(false);
+    }
+  }, [workspaceId, activeFileId, apiClient]);
+
+  useEffect(() => {
+    if (rightSidebarTab === 'versions' && activeFileId) {
+      fetchFileVersions();
+    }
+  }, [rightSidebarTab, activeFileId, fetchFileVersions]);
+
   // Fetch workspace details
   const fetchWorkspaceDetails = useCallback(async () => {
     try {
@@ -896,95 +986,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
     });
   };
 
-  // Right Sidebar Ref Sync to avoid stale callbacks
-  const rightSidebarTabRef = useRef<string | null>(null);
-  useEffect(() => {
-    rightSidebarTabRef.current = rightSidebarTab;
-    if (rightSidebarTab === 'chat') {
-      setUnreadMessages(0);
-    }
-  }, [rightSidebarTab]);
 
-  // Fetch paginated workspace chat history
-  const fetchChatHistory = useCallback(async () => {
-    try {
-      const res = await apiClient.get(`/workspaces/${workspaceId}/chat`);
-      if (res.data && res.data.success) {
-        setChatMessages(res.data.data.messages);
-      }
-    } catch (err) {
-      console.error('Failed to load chat history:', err);
-    }
-  }, [workspaceId, apiClient]);
-
-  useEffect(() => {
-    fetchChatHistory();
-  }, [fetchChatHistory]);
-
-  // Scroll to bottom of chat
-  useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatMessages, rightSidebarTab]);
-
-  // Send message
-  const handleSendChatMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    const socket = socketRef.current;
-    if (!chatInput.trim() || !socket) return;
-
-    socket.emit('chat_message', {
-      workspaceId,
-      message: chatInput.trim()
-    });
-    setChatInput('');
-
-    if (isTypingRef.current) {
-      isTypingRef.current = false;
-      socket.emit('typing_status', { workspaceId, isTyping: false });
-    }
-  };
-
-  // Typing status change
-  const handleChatInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setChatInput(e.target.value);
-    const socket = socketRef.current;
-    if (!socket) return;
-
-    if (!isTypingRef.current) {
-      isTypingRef.current = true;
-      socket.emit('typing_status', { workspaceId, isTyping: true });
-    }
-
-    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
-      isTypingRef.current = false;
-      socket.emit('typing_status', { workspaceId, isTyping: false });
-    }, 2000);
-  };
-
-  // Fetch Version history checkpoints for the active file
-  const fetchFileVersions = useCallback(async () => {
-    if (!activeFileId) return;
-    try {
-      setFileVersionsLoading(true);
-      const res = await apiClient.get(`/workspaces/${workspaceId}/files/${activeFileId}/versions`);
-      if (res.data && res.data.success) {
-        setFileVersions(res.data.data);
-      }
-    } catch (err) {
-      console.error('Failed to load versions:', err);
-    } finally {
-      setFileVersionsLoading(false);
-    }
-  }, [workspaceId, activeFileId, apiClient]);
-
-  useEffect(() => {
-    if (rightSidebarTab === 'versions' && activeFileId) {
-      fetchFileVersions();
-    }
-  }, [rightSidebarTab, activeFileId, fetchFileVersions]);
 
   // Manual save snapshot checkpoint
   const handleCreateVersionCheckpoint = async () => {

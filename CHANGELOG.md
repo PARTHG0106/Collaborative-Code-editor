@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.0] - 2026-06-19
+
+### Added
+
+- **File Version Snapshotting & Restore**: Created Prisma models and routes to capture files' current states as persistent version snapshots. Supported previewing version code directly in the workspace editor and restoring past snapshots with live collaborative synchronization.
+
+## [0.8.0] - 2026-06-19
+
+### Added
+
+- **Workspace Team Chat**: Added database models and Socket.IO events for team-wide chat channels. Included features like real-time typing indicators, unread message badges, random color coding for users, and local scroll synchronization.
+
 ## [0.7.0] - 2026-06-19
 
 ### Added
