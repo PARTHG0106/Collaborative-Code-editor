@@ -2,9 +2,11 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import cookieParser from 'cookie-parser';
 import { config } from './config/index.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import healthRoutes from './routes/health.js';
+import authRoutes from './routes/auth.js';
 
 /**
  * Creates and configures the Express application.
@@ -31,6 +33,7 @@ export function createApp(): express.Application {
   // ---------------------
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
+  app.use(cookieParser());
 
   // ---------------------
   // Logging
@@ -45,6 +48,7 @@ export function createApp(): express.Application {
   // API Routes
   // ---------------------
   app.use('/api/health', healthRoutes);
+  app.use('/api/auth', authRoutes);
 
   // Root route
   app.get('/api', (_req, res) => {

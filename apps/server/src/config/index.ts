@@ -24,6 +24,14 @@ export const config = {
 
   /** Is development? */
   isDevelopment: process.env.NODE_ENV !== 'production',
+
+  /** JWT configuration settings */
+  jwt: {
+    accessSecret: process.env.JWT_ACCESS_SECRET || 'default-access-secret',
+    refreshSecret: process.env.JWT_REFRESH_SECRET || 'default-refresh-secret',
+    accessExpiry: process.env.JWT_ACCESS_EXPIRY || '15m',
+    refreshExpiry: process.env.JWT_REFRESH_EXPIRY || '7d',
+  },
 } as const;
 
 /**
@@ -31,10 +39,22 @@ export const config = {
  * Called at server startup.
  */
 export function validateConfig(): void {
-  const required: (keyof typeof config)[] = ['databaseUrl'];
-  const missing = required.filter((key) => !config[key]);
+  const missing: string[] = [];
+
+  if (!config.databaseUrl) {
+    missing.push('DATABASE_URL');
+  }
+
+  if (config.isProduction) {
+    if (!process.env.JWT_ACCESS_SECRET || process.env.JWT_ACCESS_SECRET === 'your-access-secret-here') {
+      missing.push('JWT_ACCESS_SECRET');
+    }
+    if (!process.env.JWT_REFRESH_SECRET || process.env.JWT_REFRESH_SECRET === 'your-refresh-secret-here') {
+      missing.push('JWT_REFRESH_SECRET');
+    }
+  }
 
   if (missing.length > 0) {
-    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    throw new Error(`Missing or insecure required environment variables in production: ${missing.join(', ')}`);
   }
 }

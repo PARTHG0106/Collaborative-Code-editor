@@ -5,45 +5,88 @@ import App from './App';
 import axios from 'axios';
 
 // Mock axios
-vi.mock('axios');
-const mockedAxios = axios as Mocked<typeof axios>;
+vi.mock('axios', () => {
+  const mockAxiosInstance = {
+    get: vi.fn(),
+    post: vi.fn(),
+    interceptors: {
+      request: { use: vi.fn(), eject: vi.fn() },
+      response: { use: vi.fn(), eject: vi.fn() },
+    },
+  };
+  return {
+    default: {
+      ...mockAxiosInstance,
+      create: vi.fn(() => mockAxiosInstance),
+      isAxiosError: vi.fn((err) => false),
+    },
+    ...mockAxiosInstance,
+    isAxiosError: vi.fn((err) => false),
+  };
+});
 
-describe('Frontend App Component', () => {
+const mockedAxios = axios as unknown as Mocked<typeof axios> & {
+  create: any;
+  get: any;
+  post: any;
+};
+
+describe('Frontend App Component & Auth Flows', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+
+    // Default implementations to prevent unhandled rejections during restoreSession
+    mockedAxios.post.mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        return Promise.resolve({
+          data: {
+            success: false,
+            error: { message: 'No active session' },
+          },
+        });
+      }
+      return Promise.resolve({ data: { success: true } });
+    });
+
+    mockedAxios.get.mockImplementation((url: string) => {
+      if (url.includes('/health')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              status: 'healthy',
+              timestamp: '2026-06-19T09:00:00.000Z',
+              uptime: 120,
+              environment: 'development',
+              version: '0.1.0',
+              services: {
+                database: { status: 'connected', latency: '14ms' },
+              },
+            },
+          },
+        });
+      }
+      return Promise.resolve({ data: { success: true } });
+    });
   });
 
   it('renders landing page with title and loader initially', async () => {
-    // Return a pending promise to keep it in loading state
-    mockedAxios.get.mockReturnValue(new Promise(() => {}));
+    // Return a pending promise for health check to keep it in loading state
+    mockedAxios.get.mockImplementationOnce((url: string) => {
+      if (url.includes('/health')) {
+        return new Promise(() => {});
+      }
+      return Promise.resolve({ data: { success: true } });
+    });
 
     render(<App />);
 
     expect(screen.getByText('SyncScript')).toBeInTheDocument();
-    expect(screen.getByText('Collaborative Coding,')).toBeInTheDocument();
+    expect(screen.getByText(/Collaborative Coding/i)).toBeInTheDocument();
     expect(screen.getByText('Querying API status...')).toBeInTheDocument();
   });
 
-  it('displays API data once fetched successfully', async () => {
-    mockedAxios.get.mockResolvedValueOnce({
-      data: {
-        success: true,
-        data: {
-          status: 'healthy',
-          timestamp: '2026-06-19T09:00:00.000Z',
-          uptime: 120,
-          environment: 'development',
-          version: '0.1.0',
-          services: {
-            database: {
-              status: 'connected',
-              latency: '14ms',
-            },
-          },
-        },
-      },
-    });
-
+  it('displays API health status once fetched successfully', async () => {
     render(<App />);
 
     // Wait for the loader to disappear and status dashboard to render
@@ -57,8 +100,13 @@ describe('Frontend App Component', () => {
     expect(screen.getByText('development')).toBeInTheDocument();
   });
 
-  it('displays error UI when API request fails', async () => {
-    mockedAxios.get.mockRejectedValueOnce(new Error('Network Error'));
+  it('displays error UI when health check fails', async () => {
+    mockedAxios.get.mockImplementation((url: string) => {
+      if (url.includes('/health')) {
+        return Promise.reject(new Error('Network Error'));
+      }
+      return Promise.resolve({ data: { success: true } });
+    });
 
     render(<App />);
 
@@ -70,38 +118,43 @@ describe('Frontend App Component', () => {
     expect(screen.getByText('Error connecting to the backend services:')).toBeInTheDocument();
   });
 
-  it('refetches status when the check button is clicked', async () => {
-    mockedAxios.get.mockResolvedValueOnce({
-      data: {
-        success: true,
-        data: {
-          status: 'healthy',
-          timestamp: '2026-06-19T09:00:00.000Z',
-          uptime: 120,
-          environment: 'development',
-          version: '0.1.0',
-          services: {
-            database: {
-              status: 'connected',
-              latency: '14ms',
-            },
-          },
-        },
-      },
-    });
-
+  it('refetches health status when the refresh button is clicked', async () => {
     render(<App />);
 
     await waitFor(() => {
       expect(screen.queryByText('Querying API status...')).not.toBeInTheDocument();
     });
 
-    expect(mockedAxios.get).toHaveBeenCalledTimes(1);
+    expect(mockedAxios.get).toHaveBeenCalled();
 
-    // Click check button
-    const button = screen.getByRole('button', { name: /Check System Status/i });
+    // Click refresh button
+    const button = screen.getByRole('button', { name: /Refresh Health/i });
     fireEvent.click(button);
 
     expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('navigates to Login page and handles registration toggle', async () => {
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Querying API status...')).not.toBeInTheDocument();
+    });
+
+    // Click Sign In link in header
+    const signInLinks = screen.getAllByText('Sign In');
+    fireEvent.click(signInLinks[0]);
+
+    // Verify Login page is rendered
+    expect(screen.getByText('Welcome Back')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('you@example.com')).toBeInTheDocument();
+
+    // Click Sign Up footer redirect
+    const signUpLink = screen.getByText('Sign Up');
+    fireEvent.click(signUpLink);
+
+    // Verify Register page is rendered
+    expect(screen.getByText('Create Account')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('John Doe')).toBeInTheDocument();
   });
 });

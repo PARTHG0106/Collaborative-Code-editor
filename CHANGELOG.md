@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.2.0] - 2026-06-19
+
+### Added
+
+- **JWT Authentication Engine**: Implemented robust backend authentication with secure Access Tokens (short-lived) and Refresh Tokens (long-lived) rotation.
+- **Refresh Token Rotation & Database Logs**: Integrated automatic old-token deletion transaction on refresh to prevent replay attacks and prevent session leaks.
+- **Backend API Auth Endpoints**: Exposed `/register`, `/login`, `/refresh`, `/logout`, and `/me` routes with input validations verified by Zod.
+- **Auth Middleware**: Created `requireAuth` Express middleware to protect access to downstream endpoints.
+- **Client AuthContext**: Built global context to track authentication status, store profile details, and expose utility methods.
+- **Silent Refresh Interceptors**: Designed custom Axios client with response interceptors that intercept `401 Unauthorized` responses and renew tokens transparently.
+- **ProtectedRoute Guard**: Implemented route protector in React Router to redirect unauthorized visits back to `/login`.
+- **Glassmorphic Login & Register Interfaces**: Created premium login and sign-up interfaces using CSS glassmorphism, indicators, and validation alerts.
+- **User Dashboard**: Developed an initial dashboard area representing current session parameters and visual phase indicators.
+- **Test Coverage**: Added extensive unit and integration tests for auth routes and React navigation controls.
+
 ## [0.1.0] - 2026-06-19
 
 ### Added
