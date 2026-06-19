@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Mail, Lock, User as UserIcon, ShieldAlert, ArrowRight } from 'lucide-react';
 
@@ -12,6 +12,9 @@ export const Register: React.FC = () => {
 
   const { register, user, error, clearError } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const redirectParam = searchParams.get('redirect');
+  const from = redirectParam || '/dashboard';
 
   // Clear errors when the component mounts or values change
   useEffect(() => {
@@ -19,12 +22,12 @@ export const Register: React.FC = () => {
     setLocalError(null);
   }, [name, email, password, clearError]);
 
-  // If already logged in, redirect straight to dashboard
+  // If already logged in, redirect straight to dashboard or redirect param
   useEffect(() => {
     if (user) {
-      navigate('/dashboard', { replace: true });
+      navigate(from, { replace: true });
     }
-  }, [user, navigate]);
+  }, [user, navigate, from]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -49,7 +52,7 @@ export const Register: React.FC = () => {
 
     try {
       await register(email, password, name);
-      navigate('/dashboard', { replace: true });
+      navigate(from, { replace: true });
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : 'Registration failed';
       setLocalError(errMsg);

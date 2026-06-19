@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.3.0] - 2026-06-19
+
+### Added
+
+- **Workspace Database Models**: Added `Workspace`, `WorkspaceMember` (with role enum), and `WorkspaceInvitation` tables to Prisma schema.
+- **Workspace REST Routing**: Implemented full CRUD, role promotion, collaborator removal, and invitation management endpoints under `/api/workspaces`.
+- **Role Validation Middleware**: Created workspace membership and privilege level checking guards (`requireWorkspaceRole`).
+- **Global Workspace State**: Implemented `WorkspaceContext` in React to handle state syncing, automatic default selection, and API actions.
+- **Dropdown Workspace Selector**: Developed a premium developer-style dropdown menu supporting workspace switching and new workspace creation.
+- **Collaboration Settings Modals**: Built tabbed General Settings (rename, deletion, leave) and Member Management (revoke invites, role promotion, member deletion) overlays.
+- **Invite Token Acceptance Router**: Created `/invite/accept` path handling anonymous redirect bounds, authorization states, and invite acceptance links.
+- **System Integration Tests**: Wrote Vitest suites for Express workspace routers (7 test specs) and React context restoration (1 integration spec), achieving 28 passing specs.
+
 ## [0.2.0] - 2026-06-19
 
 ### Added

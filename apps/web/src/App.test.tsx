@@ -157,4 +157,94 @@ describe('Frontend App Component & Auth Flows', () => {
     expect(screen.getByText('Create Account')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('John Doe')).toBeInTheDocument();
   });
+
+  it('renders dashboard with workspaces when session is restored', async () => {
+    // 1. Mock refresh token route to succeed
+    mockedAxios.post.mockImplementation((url: string) => {
+      if (url.includes('/auth/refresh')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: { accessToken: 'mock-access-token' },
+          },
+        });
+      }
+      return Promise.resolve({ data: { success: true } });
+    });
+
+    // 2. Mock auth/me and workspaces routes
+    mockedAxios.get.mockImplementation((url: string) => {
+      if (url.includes('/health')) {
+        return Promise.resolve({
+          data: { success: true, data: { status: 'healthy' } },
+        });
+      }
+      if (url.includes('/auth/me')) {
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: {
+              user: { id: 'user-123', email: 'test@example.com', name: 'Test User' },
+            },
+          },
+        });
+      }
+      if (url.includes('/workspaces')) {
+        if (url.endsWith('/workspaces/ws-123') || url.includes('/workspaces/ws-')) {
+          return Promise.resolve({
+            data: {
+              success: true,
+              data: {
+                id: 'ws-123',
+                name: 'Workspace Alpha',
+                description: 'Test workspace description',
+                role: 'OWNER',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                members: [
+                  {
+                    id: 'm-1',
+                    userId: 'user-123',
+                    name: 'Test User',
+                    email: 'test@example.com',
+                    role: 'OWNER',
+                    joinedAt: new Date().toISOString(),
+                  },
+                ],
+                invitations: [],
+              },
+            },
+          });
+        }
+        return Promise.resolve({
+          data: {
+            success: true,
+            data: [
+              {
+                id: 'ws-123',
+                name: 'Workspace Alpha',
+                description: 'Test workspace description',
+                role: 'OWNER',
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+              },
+            ],
+          },
+        });
+      }
+      return Promise.resolve({ data: { success: true } });
+    });
+
+    render(<App />);
+
+    // 3. Wait for the dashboard/welcome message to render
+    await waitFor(() => {
+      expect(screen.getByText(/Welcome back,/i)).toBeInTheDocument();
+    });
+
+    // 4. Verify workspace selector and workspace detail card render
+    expect(screen.getAllByText('Workspace Alpha').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('OWNER')).toBeInTheDocument();
+    expect(screen.getByText('Phase 3: Workspaces Active')).toBeInTheDocument();
+  });
 });

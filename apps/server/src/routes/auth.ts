@@ -168,7 +168,7 @@ router.post('/login', async (req: Request, res: Response) => {
     const refreshToken = generateRefreshToken(user.id);
 
     // Calculate refresh token expiry
-    let expiresAt = new Date();
+    const expiresAt = new Date();
     let days = 7;
     const match = config.jwt.refreshExpiry.match(/^(\d+)d$/);
     if (match) days = parseInt(match[1], 10);
@@ -279,7 +279,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
     const newRefreshToken = generateRefreshToken(dbToken.user.id);
 
     // Calculate new expiry
-    let expiresAt = new Date();
+    const expiresAt = new Date();
     let days = 7;
     const match = config.jwt.refreshExpiry.match(/^(\d+)d$/);
     if (match) days = parseInt(match[1], 10);
