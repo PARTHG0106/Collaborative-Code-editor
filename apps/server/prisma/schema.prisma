@@ -1,0 +1,20 @@
+// Prisma schema for Collaborative Code Editor
+// This schema will grow as we add features in each phase
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Tracks database health and migration status
+model HealthCheck {
+  id        String   @id @default(cuid())
+  status    String   @default("ok")
+  checkedAt DateTime @default(now()) @map("checked_at")
+
+  @@map("health_checks")
+}
