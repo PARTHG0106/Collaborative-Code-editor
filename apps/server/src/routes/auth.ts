@@ -87,11 +87,50 @@ router.post('/register', async (req: Request, res: Response) => {
     });
 
     if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        error: {
-          message: 'A user with this email address already exists',
-          statusCode: 400,
+      if (existingUser.isVerified) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            message: 'A user with this email address already exists',
+            statusCode: 400,
+          },
+        });
+      }
+
+      // Existing unverified user: update their details, generate a new code, and send it
+      const passwordHash = await bcrypt.hash(password, 12);
+      const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
+      const verificationExpires = new Date(Date.now() + 3600000); // 1 hour
+
+      const updatedUser = await prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          passwordHash,
+          name,
+          verificationToken,
+          verificationExpires,
+        },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          isVerified: true,
+          createdAt: true,
+        },
+      });
+
+      sendEmail({
+        to: email,
+        subject: 'Verify your Collaborative Code Editor account',
+        text: `Hello ${name},\n\nWelcome to Collaborative Code Editor! To verify your account, please enter the following 6-digit code on the verification page:\n\n${verificationToken}\n\nThis code will expire in 1 hour.\n\nHappy Coding!\nThe Collab Team`,
+      }).catch((err) => {
+        console.error('Failed to send registration verification email:', err);
+      });
+
+      return res.status(201).json({
+        success: true,
+        data: {
+          user: updatedUser,
         },
       });
     }

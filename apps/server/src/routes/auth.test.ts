@@ -63,14 +63,14 @@ describe('Auth Routes', () => {
       expect(prisma.user.create).toHaveBeenCalled();
     });
 
-    it('should fail registration if email already exists', async () => {
+    it('should fail registration if email already exists and is verified', async () => {
       const userData = {
         email: 'test@example.com',
         password: 'password123',
         name: 'Test User',
       };
 
-      vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'existing-id' } as any);
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'existing-id', isVerified: true } as any);
 
       const response = await request(app)
         .post('/api/auth/register')
@@ -79,6 +79,34 @@ describe('Auth Routes', () => {
       expect(response.status).toBe(400);
       expect(response.body.success).toBe(false);
       expect(response.body.error.message).toContain('already exists');
+    });
+
+    it('should succeed registration by updating user if email already exists but is unverified', async () => {
+      const userData = {
+        email: 'test@example.com',
+        password: 'password123',
+        name: 'Test User',
+      };
+
+      const mockDbUser = {
+        id: 'existing-id',
+        email: 'test@example.com',
+        name: 'Test User',
+        isVerified: false,
+        createdAt: new Date(),
+      };
+
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({ id: 'existing-id', isVerified: false } as any);
+      vi.mocked(prisma.user.update).mockResolvedValue(mockDbUser as any);
+
+      const response = await request(app)
+        .post('/api/auth/register')
+        .send(userData);
+
+      expect(response.status).toBe(201);
+      expect(response.body.success).toBe(true);
+      expect(response.body.data.user.email).toBe(userData.email);
+      expect(prisma.user.update).toHaveBeenCalled();
     });
 
     it('should fail registration if validation fails', async () => {
