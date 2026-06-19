@@ -112,6 +112,47 @@ export function initSocketServer(httpServer: HTTPServer): SocketIOServer {
     });
 
     // ----------------------------------------------------
+    // WORKSPACE CHAT HANDLERS
+    // ----------------------------------------------------
+    socket.on('chat_message', async ({ workspaceId, message }) => {
+      if (!message || typeof message !== 'string' || message.trim() === '') {
+        return;
+      }
+
+      try {
+        const newMessage = await prisma.chatMessage.create({
+          data: {
+            workspaceId,
+            userId: currentUser.id,
+            message
+          },
+          include: {
+            user: {
+              select: {
+                id: true,
+                name: true,
+                email: true
+              }
+            }
+          }
+        });
+
+        // Broadcast chat message to workspace room
+        io.to(`workspace:${workspaceId}`).emit('chat_message', newMessage);
+      } catch (err) {
+        console.error('Failed to save chat message in socket:', err);
+      }
+    });
+
+    socket.on('typing_status', ({ workspaceId, isTyping }) => {
+      socket.to(`workspace:${workspaceId}`).emit('typing_status', {
+        userId: currentUser.id,
+        name: currentUser.name,
+        isTyping
+      });
+    });
+
+    // ----------------------------------------------------
     // REAL-TIME COLLABORATIVE EDITOR SYNC
     // ----------------------------------------------------
     socket.on('join_file', async ({ fileId }) => {

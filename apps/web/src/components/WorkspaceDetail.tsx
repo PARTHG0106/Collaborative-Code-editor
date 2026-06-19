@@ -4,7 +4,7 @@ import {
   ArrowLeft, Users, Shield, ShieldAlert, ShieldCheck, UserPlus, 
   Trash2, LogOut, Check, X, Edit2, Loader2, Mail, Calendar,
   Folder, File, FolderPlus, FilePlus, ChevronDown, ChevronRight, Save, Terminal, Code,
-  Eye, EyeOff, AlignLeft, Sun, Moon
+  Eye, EyeOff, AlignLeft, Sun, Moon, MessageSquare, History
 } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 import { io, Socket } from 'socket.io-client';
@@ -179,6 +179,20 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
   const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
   const [renamingName, setRenamingName] = useState('');
 
+  // Chat States
+  const [rightSidebarTab, setRightSidebarTab] = useState<'chat' | 'versions' | null>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [typingUsers, setTypingUsers] = useState<Array<{ userId: string; name: string }>>([]);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const isTypingRef = useRef(false);
+  const typingTimeoutRef = useRef<any>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Version History States
+  const [fileVersions, setFileVersions] = useState<any[]>([]);
+  const [fileVersionsLoading, setFileVersionsLoading] = useState(false);
+
   // Scroll Sync Refs
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const lineNumbersRef = useRef<HTMLDivElement>(null);
@@ -257,6 +271,24 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
         if (!currentMemberIds.has(userId) && editorRef.current) {
           editorRef.current.deltaDecorations(decorations, []);
           remoteDecorationsRef.current.delete(userId);
+        }
+      });
+    });
+
+    socket.on('chat_message', (msg: any) => {
+      setChatMessages(prev => [...prev, msg]);
+      if (rightSidebarTabRef.current !== 'chat') {
+        setUnreadMessages(prev => prev + 1);
+      }
+    });
+
+    socket.on('typing_status', ({ userId, name, isTyping }: { userId: string, name: string, isTyping: boolean }) => {
+      setTypingUsers(prev => {
+        if (isTyping) {
+          if (prev.some(u => u.userId === userId)) return prev;
+          return [...prev, { userId, name }];
+        } else {
+          return prev.filter(u => u.userId !== userId);
         }
       });
     });
@@ -864,6 +896,148 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
     });
   };
 
+  // Right Sidebar Ref Sync to avoid stale callbacks
+  const rightSidebarTabRef = useRef<string | null>(null);
+  useEffect(() => {
+    rightSidebarTabRef.current = rightSidebarTab;
+    if (rightSidebarTab === 'chat') {
+      setUnreadMessages(0);
+    }
+  }, [rightSidebarTab]);
+
+  // Fetch paginated workspace chat history
+  const fetchChatHistory = useCallback(async () => {
+    try {
+      const res = await apiClient.get(`/workspaces/${workspaceId}/chat`);
+      if (res.data && res.data.success) {
+        setChatMessages(res.data.data.messages);
+      }
+    } catch (err) {
+      console.error('Failed to load chat history:', err);
+    }
+  }, [workspaceId, apiClient]);
+
+  useEffect(() => {
+    fetchChatHistory();
+  }, [fetchChatHistory]);
+
+  // Scroll to bottom of chat
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [chatMessages, rightSidebarTab]);
+
+  // Send message
+  const handleSendChatMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    const socket = socketRef.current;
+    if (!chatInput.trim() || !socket) return;
+
+    socket.emit('chat_message', {
+      workspaceId,
+      message: chatInput.trim()
+    });
+    setChatInput('');
+
+    if (isTypingRef.current) {
+      isTypingRef.current = false;
+      socket.emit('typing_status', { workspaceId, isTyping: false });
+    }
+  };
+
+  // Typing status change
+  const handleChatInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setChatInput(e.target.value);
+    const socket = socketRef.current;
+    if (!socket) return;
+
+    if (!isTypingRef.current) {
+      isTypingRef.current = true;
+      socket.emit('typing_status', { workspaceId, isTyping: true });
+    }
+
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    typingTimeoutRef.current = setTimeout(() => {
+      isTypingRef.current = false;
+      socket.emit('typing_status', { workspaceId, isTyping: false });
+    }, 2000);
+  };
+
+  // Fetch Version history checkpoints for the active file
+  const fetchFileVersions = useCallback(async () => {
+    if (!activeFileId) return;
+    try {
+      setFileVersionsLoading(true);
+      const res = await apiClient.get(`/workspaces/${workspaceId}/files/${activeFileId}/versions`);
+      if (res.data && res.data.success) {
+        setFileVersions(res.data.data);
+      }
+    } catch (err) {
+      console.error('Failed to load versions:', err);
+    } finally {
+      setFileVersionsLoading(false);
+    }
+  }, [workspaceId, activeFileId, apiClient]);
+
+  useEffect(() => {
+    if (rightSidebarTab === 'versions' && activeFileId) {
+      fetchFileVersions();
+    }
+  }, [rightSidebarTab, activeFileId, fetchFileVersions]);
+
+  // Manual save snapshot checkpoint
+  const handleCreateVersionCheckpoint = async () => {
+    if (!activeFileId) return;
+    try {
+      setActionLoading(true);
+      const res = await apiClient.post(`/workspaces/${workspaceId}/files/${activeFileId}/versions`);
+      if (res.data && res.data.success) {
+        setFileVersions(prev => [res.data.data, ...prev]);
+        setSuccessMsg('Version snapshot checkpoint saved successfully!');
+        setTimeout(() => setSuccessMsg(null), 3000);
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error?.message || 'Failed to commit snapshot');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handlePreviewVersion = (content: string) => {
+    setEditorContent(content);
+    setSaveStatus('unsaved');
+  };
+
+  // Restore snapshot and broadcast to room
+  const handleRestoreVersion = async (versionId: string) => {
+    if (!activeFileId) return;
+    try {
+      setActionLoading(true);
+      const res = await apiClient.post(`/workspaces/${workspaceId}/files/${activeFileId}/versions/${versionId}/restore`);
+      if (res.data && res.data.success) {
+        if (socketRef.current) {
+          socketRef.current.emit('edit_file', {
+            fileId: activeFileId,
+            baseVersion: localVersionRef.current,
+            edit: {
+              offset: 0,
+              text: res.data.data.content,
+              length: editorContent.length
+            }
+          });
+        }
+        setEditorContent(res.data.data.content);
+        setSuccessMsg('Restored file to selected version snapshot!');
+        setTimeout(() => setSuccessMsg(null), 3000);
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.error?.message || 'Failed to restore snapshot');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   return (
     <div className="workspace-detail-container">
       {/* Alert Overlays */}
@@ -1059,6 +1233,27 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
 
                     <div className="h-4 w-[1px] bg-white/10 mx-1"></div>
 
+                    <button 
+                      className={`explorer-action-btn relative ${rightSidebarTab === 'chat' ? 'text-purple-400' : ''}`}
+                      title="Workspace Chat"
+                      onClick={() => setRightSidebarTab(prev => prev === 'chat' ? null : 'chat')}
+                    >
+                      <MessageSquare size={14} />
+                      {unreadMessages > 0 && (
+                        <span className="unread-badge">{unreadMessages}</span>
+                      )}
+                    </button>
+
+                    <button 
+                      className={`explorer-action-btn ${rightSidebarTab === 'versions' ? 'text-purple-400' : ''}`}
+                      title="Version History"
+                      onClick={() => setRightSidebarTab(prev => prev === 'versions' ? null : 'versions')}
+                    >
+                      <History size={14} />
+                    </button>
+
+                    <div className="h-4 w-[1px] bg-white/10 mx-1"></div>
+
                     <span className={`save-status-indicator ${saveStatus}`}>
                       {saveStatus === 'saving' && 'Saving...'}
                       {saveStatus === 'unsaved' && 'Unsaved changes'}
@@ -1118,6 +1313,125 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
               </div>
             )}
           </main>
+
+          {/* Right Sidebar Panel for Chat & Version History */}
+          {rightSidebarTab && (
+            <aside className="workspace-right-sidebar glass-card">
+              <div className="right-sidebar-header">
+                <span className="right-sidebar-title font-medium">
+                  {rightSidebarTab === 'chat' ? 'Workspace Chat' : 'Version History'}
+                </span>
+                <button 
+                  className="explorer-action-btn close-btn"
+                  title="Close Sidebar"
+                  onClick={() => setRightSidebarTab(null)}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+
+              <div className="right-sidebar-body">
+                {rightSidebarTab === 'chat' ? (
+                  <div className="chat-container">
+                    <div className="chat-messages">
+                      {chatMessages.map((msg, index) => {
+                        const isSelf = msg.userId === user?.id;
+                        return (
+                          <div key={msg.id || index} className={`chat-message ${isSelf ? 'self' : ''}`}>
+                            <div className="chat-message-meta">
+                              <span className="chat-message-author" style={{ color: getRandomColorForUser(msg.userId) }}>
+                                {msg.user?.name || 'Collaborator'}
+                              </span>
+                              <span className="chat-message-time">
+                                {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <div className="chat-message-bubble">
+                              {msg.message}
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {typingUsers.length > 0 && (
+                        <div className="chat-typing-indicator">
+                          {typingUsers.map(u => u.name).join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+                        </div>
+                      )}
+                      <div ref={chatEndRef} />
+                    </div>
+
+                    <form onSubmit={handleSendChatMessage} className="chat-input-form">
+                      <input
+                        type="text"
+                        placeholder="Type a message..."
+                        value={chatInput}
+                        onChange={handleChatInputChange}
+                        className="chat-input"
+                      />
+                      <button type="submit" className="btn btn-primary px-3 py-1 text-xs">
+                        Send
+                      </button>
+                    </form>
+                  </div>
+                ) : (
+                  <div className="versions-container">
+                    <div className="flex gap-2 p-3 border-b border-white/5">
+                      <button 
+                        className="btn btn-primary btn-icon w-full py-1.5 text-xs"
+                        onClick={handleCreateVersionCheckpoint}
+                        disabled={actionLoading || !activeFileId}
+                      >
+                        <Save size={12} />
+                        <span>Commit Version Snapshot</span>
+                      </button>
+                    </div>
+
+                    <div className="versions-list">
+                      {fileVersionsLoading ? (
+                        <div className="p-4 text-center">
+                          <Loader2 className="animate-spin text-purple-500 mx-auto" size={18} />
+                          <span className="text-xs text-gray-500 mt-1 block">Loading snapshots...</span>
+                        </div>
+                      ) : fileVersions.length === 0 ? (
+                        <div className="p-4 text-center text-xs text-gray-500">
+                          No snapshot history. Commit a version to save progress checkpoints!
+                        </div>
+                      ) : (
+                        fileVersions.map((v) => (
+                          <div key={v.id} className="version-item">
+                            <div className="version-item-header">
+                              <span className="version-badge">Version {v.version}</span>
+                              <span className="version-time">
+                                {new Date(v.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
+                            <div className="version-item-meta">
+                              <span>By: {v.user?.name || 'System'}</span>
+                            </div>
+                            <div className="version-actions mt-2 flex gap-2">
+                              <button 
+                                className="btn btn-secondary py-0.5 px-2 text-[10px] w-full"
+                                onClick={() => handlePreviewVersion(v.content)}
+                              >
+                                View Code
+                              </button>
+                              <button 
+                                className="btn btn-primary py-0.5 px-2 text-[10px] w-full"
+                                onClick={() => handleRestoreVersion(v.id)}
+                                disabled={actionLoading}
+                              >
+                                Restore
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </aside>
+          )}
         </div>
       ) : (
         /* Settings and Collaborators content tab */

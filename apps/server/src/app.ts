@@ -9,6 +9,8 @@ import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import workspaceRoutes from './routes/workspace.js';
 import fileRoutes from './routes/file.js';
+import chatRoutes from './routes/chat.js';
+import versionRoutes from './routes/version.js';
 
 /**
  * Creates and configures the Express application.
@@ -53,6 +55,8 @@ export function createApp(): express.Application {
   app.use('/api/auth', authRoutes);
   app.use('/api/workspaces', workspaceRoutes);
   app.use('/api/workspaces/:workspaceId/files', fileRoutes);
+  app.use('/api/workspaces/:workspaceId/chat', chatRoutes);
+  app.use('/api/workspaces/:workspaceId/files/:fileId/versions', versionRoutes);
 
   // Root route
   app.get('/api', (_req, res) => {

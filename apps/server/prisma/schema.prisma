@@ -28,6 +28,8 @@ model User {
   updatedAt     DateTime          @updatedAt @map("updated_at")
   refreshTokens RefreshToken[]
   workspaces    WorkspaceMember[]
+  chatMessages  ChatMessage[]
+  fileVersions  FileVersion[]
 
   @@map("users")
 }
@@ -58,6 +60,7 @@ model Workspace {
   updatedAt       DateTime          @updatedAt @map("updated_at")
   members         WorkspaceMember[]
   fileSystemItems FileSystemItem[]
+  chatMessages    ChatMessage[]
 
   @@map("workspaces")
 }
@@ -92,8 +95,33 @@ model FileSystemItem {
   workspace   Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   createdAt   DateTime           @default(now()) @map("created_at")
   updatedAt   DateTime           @updatedAt @map("updated_at")
+  versions    FileVersion[]
 
   @@unique([workspaceId, parentId, name])
   @@map("file_system_items")
 }
 
+model ChatMessage {
+  id          String    @id @default(cuid())
+  workspaceId String    @map("workspace_id")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message     String
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@map("chat_messages")
+}
+
+model FileVersion {
+  id        String         @id @default(cuid())
+  fileId    String         @map("file_id")
+  file      FileSystemItem @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  content   String
+  version   Int
+  userId    String?        @map("user_id")
+  user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  @@map("file_versions")
+}
