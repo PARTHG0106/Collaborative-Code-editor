@@ -42,6 +42,14 @@ export const config = {
 export function validateConfig(): void {
   const missing: string[] = [];
 
+  const dbUrl = process.env.DATABASE_URL || '';
+  if (dbUrl) {
+    const masked = dbUrl.replace(/:([^:@]+)@/, ':***@');
+    console.info(`ℹ️ Loaded DATABASE_URL: ${masked}`);
+  } else {
+    console.warn('⚠️ DATABASE_URL is not set in process.env!');
+  }
+
   if (!config.databaseUrl) {
     missing.push('DATABASE_URL');
   }
