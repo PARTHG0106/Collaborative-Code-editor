@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Mail, Lock, User as UserIcon, ShieldAlert, ArrowRight } from 'lucide-react';
-import { FloatingPaths } from '@/components/ui/FloatingPaths';
 import { Button } from '@/components/ui/button';
 
 export const Register: React.FC = () => {
@@ -71,7 +70,7 @@ export const Register: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-[#0a0b10] via-[#0a0b10] to-[#6366f1]/10 flex items-center justify-center p-6 overflow-hidden relative">
+    <div className="min-h-screen w-full flex items-center justify-center p-6 relative">
       {/* Mouse gradient effect */}
       <div
         className="fixed inset-0 pointer-events-none z-0"
@@ -79,12 +78,6 @@ export const Register: React.FC = () => {
           background: `radial-gradient(600px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(99, 102, 241, 0.08), transparent 40%)`,
         }}
       />
-
-      {/* Floating Paths Background */}
-      <div className="absolute inset-0">
-        <FloatingPaths position={1} />
-        <FloatingPaths position={-1} />
-      </div>
 
       <div className="auth-card glass-card relative z-10 max-w-[440px] w-full p-10 bg-background/50 backdrop-blur-lg border border-border/50 shadow-glow rounded-2xl flex flex-col gap-6">
         <div className="auth-header-content text-center flex flex-col items-center gap-3">

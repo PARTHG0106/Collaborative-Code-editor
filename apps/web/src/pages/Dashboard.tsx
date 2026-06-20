@@ -6,7 +6,6 @@ import {
   Plus, Users, ArrowRight, ShieldCheck, Shield, ShieldAlert,
   X, Loader2
 } from 'lucide-react';
-import { FloatingPaths } from '@/components/ui/FloatingPaths';
 
 interface Workspace {
   id: string;
@@ -116,7 +115,7 @@ export const Dashboard: React.FC = () => {
   if (!user) return null;
 
   return (
-    <div className="min-h-screen w-full bg-gradient-to-br from-[#0a0b10] via-[#0a0b10] to-[#6366f1]/5 flex flex-col position-relative overflow-hidden">
+    <div className="min-h-screen w-full flex flex-col relative">
       {/* Mouse gradient effect */}
       <div
         className="fixed inset-0 pointer-events-none z-0"
@@ -124,12 +123,6 @@ export const Dashboard: React.FC = () => {
           background: `radial-gradient(800px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(99, 102, 241, 0.05), transparent 40%)`,
         }}
       />
-
-      {/* Floating Paths Background */}
-      <div className="absolute inset-0 z-0">
-        <FloatingPaths position={1} />
-        <FloatingPaths position={-1} />
-      </div>
 
       <header className="dashboard-header glass-card relative z-10">
         <div className="brand">
