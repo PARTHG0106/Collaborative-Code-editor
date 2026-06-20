@@ -6,6 +6,7 @@ import {
   Plus, Users, ArrowRight, ShieldCheck, Shield, ShieldAlert,
   X, Loader2
 } from 'lucide-react';
+import { FloatingPaths } from '@/components/ui/FloatingPaths';
 
 interface Workspace {
   id: string;
@@ -21,6 +22,7 @@ interface Workspace {
 export const Dashboard: React.FC = () => {
   const { user, logout, apiClient } = useAuth();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
 
   // Workspaces state
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -54,6 +56,15 @@ export const Dashboard: React.FC = () => {
   useEffect(() => {
     fetchWorkspaces();
   }, [fetchWorkspaces]);
+
+  // Track mouse coordinates for background lighting glow
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      setMousePosition({ x: e.clientX, y: e.clientY });
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
 
   const handleLogout = async () => {
     setIsLoggingOut(true);
@@ -105,12 +116,22 @@ export const Dashboard: React.FC = () => {
   if (!user) return null;
 
   return (
-    <div className="dashboard-container">
-      {/* Background decorative elements */}
-      <div className="glow-orb orb-1"></div>
-      <div className="glow-orb orb-2"></div>
+    <div className="min-h-screen w-full bg-gradient-to-br from-[#0a0b10] via-[#0a0b10] to-[#6366f1]/5 flex flex-col position-relative overflow-hidden">
+      {/* Mouse gradient effect */}
+      <div
+        className="fixed inset-0 pointer-events-none z-0"
+        style={{
+          background: `radial-gradient(800px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(99, 102, 241, 0.05), transparent 40%)`,
+        }}
+      />
 
-      <header className="dashboard-header glass-card">
+      {/* Floating Paths Background */}
+      <div className="absolute inset-0 z-0">
+        <FloatingPaths position={1} />
+        <FloatingPaths position={-1} />
+      </div>
+
+      <header className="dashboard-header glass-card relative z-10">
         <div className="brand">
           <div className="brand-logo">&lt;/&gt;</div>
           <span className="brand-name">SyncScript</span>
@@ -132,7 +153,7 @@ export const Dashboard: React.FC = () => {
         </div>
       </header>
 
-      <main className="dashboard-main">
+      <main className="dashboard-main relative z-10">
         {/* Error notification */}
         {dashboardError && (
           <div className="alert alert-danger glass-card">
@@ -140,6 +161,7 @@ export const Dashboard: React.FC = () => {
             <span>{dashboardError}</span>
           </div>
         )}
+
 
         {activeWorkspaceId ? (
           /* Render Workspace Details View */
@@ -314,7 +336,7 @@ export const Dashboard: React.FC = () => {
         </div>
       )}
 
-      <footer className="dashboard-footer">
+      <footer className="dashboard-footer relative z-10">
         <p>&copy; {new Date().getFullYear()} SyncScript. Secured with JSON Web Token Rotation.</p>
       </footer>
     </div>

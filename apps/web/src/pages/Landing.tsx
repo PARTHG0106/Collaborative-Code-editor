@@ -86,15 +86,16 @@ function FeatureCard({ icon, title, description, delay }: FeatureCardProps) {
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
       transition={{ duration: 0.6, delay }}
+      className="h-full"
     >
-      <Card className="bg-background/50 backdrop-blur-lg border-border/50 hover:border-primary/50 transition-all duration-300 hover:shadow-lg hover:shadow-primary/10 group">
+      <Card className="bg-background/50 backdrop-blur-lg border-border/50 hover:border-primary/50 transition-all duration-300 hover:shadow-lg hover:shadow-primary/10 group h-full flex flex-col">
         <CardHeader>
           <div className="w-12 h-12 rounded-lg bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
             {icon}
           </div>
           <CardTitle className="text-xl">{title}</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="flex-1">
           <CardDescription className="text-base">{description}</CardDescription>
         </CardContent>
       </Card>
@@ -102,40 +103,6 @@ function FeatureCard({ icon, title, description, delay }: FeatureCardProps) {
   );
 }
 
-interface TestimonialCardProps {
-  name: string;
-  role: string;
-  content: string;
-  avatar: string;
-  delay: number;
-}
-
-function TestimonialCard({ name, role, content, avatar, delay }: TestimonialCardProps) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.9 }}
-      whileInView={{ opacity: 1, scale: 1 }}
-      viewport={{ once: true }}
-      transition={{ duration: 0.5, delay }}
-    >
-      <Card className="bg-background/50 backdrop-blur-lg border-border/50 h-full">
-        <CardContent className="pt-6">
-          <div className="flex items-start gap-4 mb-4">
-            <Avatar>
-              <AvatarImage src={avatar} alt={name} />
-              <AvatarFallback>{name.split(' ').map(n => n[0]).join('')}</AvatarFallback>
-            </Avatar>
-            <div>
-              <p className="font-semibold">{name}</p>
-              <p className="text-sm text-muted-foreground">{role}</p>
-            </div>
-          </div>
-          <p className="text-muted-foreground italic">"{content}"</p>
-        </CardContent>
-      </Card>
-    </motion.div>
-  );
-}
 
 export const Landing: React.FC = () => {
   const { user } = useAuth();
@@ -211,26 +178,6 @@ export const Landing: React.FC = () => {
     },
   ];
 
-  const testimonials = [
-    {
-      name: "Sarah Chen",
-      role: "Lead Developer at TechCorp",
-      content: "SyncScript transformed how our team collaborates. The real-time sync is flawless!",
-      avatar: "/avatars/sarah.jpg",
-    },
-    {
-      name: "Marcus Johnson",
-      role: "CTO at StartupXYZ",
-      content: "Best collaborative coding tool we've used. The version history saved us countless times.",
-      avatar: "/avatars/marcus.jpg",
-    },
-    {
-      name: "Emily Rodriguez",
-      role: "Senior Engineer at DevHub",
-      content: "The live chat feature keeps our team connected. No more context switching!",
-      avatar: "/avatars/emily.jpg",
-    },
-  ];
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-br from-[#0a0b10] via-[#0a0b10] to-[#6366f1]/10 overflow-hidden relative">
@@ -461,34 +408,6 @@ export const Landing: React.FC = () => {
           </div>
         </section>
 
-        {/* Testimonials */}
-        <section className="py-24 px-4 md:px-6 bg-gradient-to-b from-transparent via-[#6366f1]/5 to-transparent">
-          <div className="container mx-auto max-w-7xl">
-            <motion.div
-              className="text-center mb-16"
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.6 }}
-            >
-              <h2 className="text-4xl md:text-5xl font-bold mb-4 text-white">
-                Loved by Developers
-                <span className="block bg-gradient-to-r from-primary to-[#a855f7] bg-clip-text text-transparent">
-                  Worldwide
-                </span>
-              </h2>
-              <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
-                Join thousands of teams already coding better together.
-              </p>
-            </motion.div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              {testimonials.map((testimonial, index) => (
-                <TestimonialCard key={index} {...testimonial} delay={index * 0.1} />
-              ))}
-            </div>
-          </div>
-        </section>
 
         {/* CTA Section */}
         <section className="py-24 px-4 md:px-6">
@@ -525,11 +444,7 @@ export const Landing: React.FC = () => {
                             <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
                           </Button>
                         </Link>
-                        <Link to="/login">
-                          <Button size="lg" variant="outline" className="text-lg px-8 py-6 rounded-full backdrop-blur-sm bg-background/50 border-white/10 text-white hover:bg-white/5">
-                            Schedule Demo
-                          </Button>
-                        </Link>
+
                       </>
                     )}
                   </div>

@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { KeyRound, ShieldAlert, ArrowRight, CheckCircle2, RotateCw } from 'lucide-react';
+import { FloatingPaths } from '@/components/ui/FloatingPaths';
+import { Button } from '@/components/ui/button';
 
 export const VerifyEmail: React.FC = () => {
   const [searchParams] = useSearchParams();
@@ -12,6 +14,7 @@ export const VerifyEmail: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
 
   const { verifyEmail, resendVerification, user, error, clearError } = useAuth();
   const navigate = useNavigate();
@@ -42,6 +45,15 @@ export const VerifyEmail: React.FC = () => {
       navigate('/dashboard', { replace: true });
     }
   }, [user, navigate]);
+
+  // Track mouse coordinates for background lighting glow
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      setMousePosition({ x: e.clientX, y: e.clientY });
+    };
+    window.addEventListener("mousemove", handleMouseMove);
+    return () => window.removeEventListener("mousemove", handleMouseMove);
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,52 +103,52 @@ export const VerifyEmail: React.FC = () => {
   };
 
   return (
-    <div className="auth-container">
-      <div className="glow-orb orb-1"></div>
-      <div className="glow-orb orb-2"></div>
+    <div className="min-h-screen w-full bg-gradient-to-br from-[#0a0b10] via-[#0a0b10] to-[#6366f1]/10 flex items-center justify-center p-6 overflow-hidden relative">
+      {/* Mouse gradient effect */}
+      <div
+        className="fixed inset-0 pointer-events-none z-0"
+        style={{
+          background: `radial-gradient(600px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(99, 102, 241, 0.08), transparent 40%)`,
+        }}
+      />
 
-      <div className="auth-card glass-card">
-        <div className="auth-header-content">
-          <div className="auth-brand">
-            <div className="brand-logo">&lt;/&gt;</div>
-            <span className="brand-name font-sans">SyncScript</span>
+      {/* Floating Paths Background */}
+      <div className="absolute inset-0">
+        <FloatingPaths position={1} />
+        <FloatingPaths position={-1} />
+      </div>
+
+      <div className="auth-card glass-card relative z-10 max-w-[440px] w-full p-10 bg-background/50 backdrop-blur-lg border border-border/50 shadow-glow rounded-2xl flex flex-col gap-6">
+        <div className="auth-header-content text-center flex flex-col items-center gap-3">
+          <div className="auth-brand inline-flex items-center gap-2">
+            <div className="text-xl font-bold bg-gradient-to-r from-primary to-[#a855f7] bg-clip-text text-transparent brand-logo">&lt;/&gt;</div>
+            <span className="text-xl font-bold text-white brand-name font-sans">SyncScript</span>
           </div>
-          <h2 className="auth-title">Verify Email</h2>
-          <p className="auth-subtitle">
-            Enter the 6-digit code sent to <strong style={{ color: 'var(--primary-light)' }}>{email || 'your email'}</strong>
+          <h2 className="text-3xl font-extrabold tracking-tight text-white mt-2">Verify Email</h2>
+          <p className="text-sm text-gray-400">
+            Enter the 6-digit code sent to <strong style={{ color: 'var(--primary)' }}>{email || 'your email'}</strong>
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="auth-form">
+        <form onSubmit={handleSubmit} className="auth-form flex flex-col gap-4">
           {(localError || error) && (
-            <div className="auth-error-alert">
-              <ShieldAlert className="alert-icon" size={18} />
+            <div className="auth-error-alert flex items-center gap-3 bg-red-500/10 border border-red-500/30 text-red-400 p-3.5 rounded-lg text-sm">
+              <ShieldAlert className="alert-icon flex-shrink-0" size={18} />
               <span>{localError || error}</span>
             </div>
           )}
 
           {successMessage && (
-            <div className="auth-success-alert" style={{
-              display: 'flex',
-              gap: '8px',
-              alignItems: 'center',
-              backgroundColor: 'rgba(16, 185, 129, 0.1)',
-              border: '1px solid rgba(16, 185, 129, 0.2)',
-              color: '#34d399',
-              padding: '10px 14px',
-              borderRadius: '8px',
-              marginBottom: '16px',
-              fontSize: '0.875rem'
-            }}>
+            <div className="auth-success-alert flex items-center gap-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 p-3.5 rounded-lg text-sm">
               <CheckCircle2 size={18} style={{ flexShrink: 0 }} />
               <span>{successMessage}</span>
             </div>
           )}
 
-          <div className="input-group">
-            <label htmlFor="code">Verification Code</label>
-            <div className="input-wrapper">
-              <KeyRound className="input-icon" size={18} />
+          <div className="input-group flex flex-col gap-2">
+            <label htmlFor="code" className="text-xs font-semibold text-gray-400 tracking-wider">Verification Code</label>
+            <div className="input-wrapper relative flex items-center">
+              <KeyRound className="input-icon absolute left-3.5 text-gray-500 pointer-events-none" size={18} />
               <input
                 id="code"
                 type="text"
@@ -145,6 +157,7 @@ export const VerifyEmail: React.FC = () => {
                 value={code}
                 onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
                 disabled={isSubmitting || !email}
+                className="w-full pl-11 pr-4 py-3 bg-[#12131a]/40 border border-border/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:bg-[#12131a]/60 transition-all duration-200"
                 required
                 style={{
                   letterSpacing: code ? '0.4em' : 'normal',
@@ -156,23 +169,23 @@ export const VerifyEmail: React.FC = () => {
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary btn-block btn-auth" disabled={isSubmitting || !email}>
+          <Button type="submit" className="w-full mt-4 py-6 text-base font-semibold group rounded-lg" disabled={isSubmitting || !email}>
             {isSubmitting ? (
-              <span className="button-loading">
+              <span className="button-loading flex items-center justify-center gap-2">
                 <span className="btn-spinner"></span> Verifying...
               </span>
             ) : (
-              <>
-                Verify &amp; Continue <ArrowRight size={16} style={{ marginLeft: '8px' }} />
-              </>
+              <span className="flex items-center justify-center gap-2">
+                Verify &amp; Continue <ArrowRight size={16} className="group-hover:translate-x-1 transition-transform" />
+              </span>
             )}
-          </button>
+          </Button>
         </form>
 
-        <div className="auth-footer" style={{ marginTop: '24px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div className="auth-footer text-center mt-2 flex flex-col gap-4 text-sm text-gray-400">
           <button
             type="button"
-            className="auth-link"
+            className="hover:text-white transition-colors"
             onClick={handleResend}
             disabled={resendCooldown > 0 || isSubmitting || !email}
             style={{
@@ -184,7 +197,7 @@ export const VerifyEmail: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'center',
               gap: '6px',
-              color: resendCooldown > 0 ? 'var(--text-muted)' : 'var(--primary-color)',
+              color: resendCooldown > 0 ? 'var(--text-muted)' : 'var(--primary)',
               opacity: resendCooldown > 0 ? 0.6 : 1,
             }}
           >
@@ -194,7 +207,7 @@ export const VerifyEmail: React.FC = () => {
 
           <p style={{ margin: 0 }}>
             Back to{' '}
-            <Link to="/login" className="auth-link">
+            <Link to="/login" className="text-primary hover:text-primary/80 font-semibold transition-colors">
               Sign In
             </Link>
           </p>

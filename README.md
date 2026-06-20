@@ -1,3 +1,13 @@
+---
+title: syncscript-api
+emoji: 🚀
+colorFrom: indigo
+colorTo: purple
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # SyncScript - Collaborative Real-Time Code Editor
 
 SyncScript is a high-performance, production-grade collaborative real-time code editor built on a modern TypeScript monorepo using React, Express, PostgreSQL, Prisma, and Turborepo. It features a stunning glassmorphic interface, state-of-the-art secure token rotation, and modular components.
