@@ -267,6 +267,7 @@ router.post('/login', async (req: Request, res: Response) => {
       success: true,
       data: {
         accessToken,
+        refreshToken,
         user: {
           id: user.id,
           email: user.email,
@@ -381,6 +382,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
       success: true,
       data: {
         accessToken,
+        refreshToken: newRefreshToken,
       },
     });
   } catch (error) {
@@ -582,6 +584,7 @@ router.post('/verify', async (req: Request, res: Response) => {
       success: true,
       data: {
         accessToken,
+        refreshToken,
         user: updatedUser,
       },
     });
