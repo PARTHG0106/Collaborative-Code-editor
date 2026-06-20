@@ -65,9 +65,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       (response) => response,
       async (err) => {
         const originalRequest = err.config;
+        const url = originalRequest?.url || '';
+        const isPublicAuthEndpoint = 
+          url.includes('/auth/login') ||
+          url.includes('/auth/register') ||
+          url.includes('/auth/verify') ||
+          url.includes('/auth/resend-verification') ||
+          url.includes('/auth/refresh');
 
-        // If error is 401 (Unauthorized) and not already retried
-        if (err.response?.status === 401 && !originalRequest._retry) {
+        // If error is 401 (Unauthorized), not already retried, and NOT a public auth endpoint
+        if (err.response?.status === 401 && originalRequest && !originalRequest._retry && !isPublicAuthEndpoint) {
           originalRequest._retry = true;
 
           try {
