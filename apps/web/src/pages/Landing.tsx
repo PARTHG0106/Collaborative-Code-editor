@@ -155,25 +155,25 @@ export const Landing: React.FC = () => {
 
       <div className="relative z-10">
         {/* Sticky Glassmorphic Header Navigation */}
-        <header className="flex justify-between items-center px-8 py-5 border-b border-white/5 backdrop-blur-md bg-[#0a0b10]/60 sticky top-0 z-50">
+        <header className="flex justify-between items-center px-4 sm:px-8 py-4 sm:py-5 border-b border-white/5 backdrop-blur-md bg-[#0a0b10]/60 sticky top-0 z-50">
           <div className="flex items-center gap-2">
             <div className="text-xl font-bold bg-gradient-to-r from-primary to-[#a855f7] bg-clip-text text-transparent brand-logo">&lt;/&gt;</div>
-            <span className="text-xl font-bold text-white brand-name">SyncScript</span>
+            <span className="text-lg sm:text-xl font-bold text-white brand-name">SyncScript</span>
           </div>
-          <nav className="flex gap-4 items-center header-nav">
+          <nav className="flex gap-3 sm:gap-4 items-center header-nav">
             {user ? (
               <Link to="/dashboard">
-                <Button variant="outline" size="sm" className="backdrop-blur-sm bg-background/50">
+                <Button variant="outline" size="sm" className="backdrop-blur-sm bg-background/50 text-xs sm:text-sm px-2.5 sm:px-4">
                   Dashboard
                 </Button>
               </Link>
             ) : (
               <>
-                <Link to="/login" className="text-sm font-medium text-gray-400 hover:text-white transition-colors">
+                <Link to="/login" className="text-xs sm:text-sm font-medium text-gray-400 hover:text-white transition-colors">
                   Sign In
                 </Link>
                 <Link to="/register">
-                  <Button size="sm">Sign Up</Button>
+                  <Button size="sm" className="text-xs sm:text-sm px-2.5 sm:px-4">Sign Up</Button>
                 </Link>
               </>
             )}
@@ -189,52 +189,66 @@ export const Landing: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6 }}
               >
-                <Badge variant="outline" className="mb-6 px-4 py-2 text-sm backdrop-blur-sm bg-background/50 border-primary/30 text-white">
+                <Badge variant="outline" className="mb-6 px-4 py-2 text-xs sm:text-sm backdrop-blur-sm bg-background/50 border-primary/30 text-white">
                   <Activity className="w-4 h-4 mr-2 inline-block text-green-500 animate-pulse" />
                   All Systems Operational
                 </Badge>
               </motion.div>
 
               <motion.h1
-                className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold tracking-tighter"
+                className="text-4xl sm:text-6xl md:text-7xl lg:text-8xl font-bold tracking-tighter"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ duration: 1 }}
               >
-                <span className="block mb-4">
-                  {"Collaborative Coding,".split("").map((char, i) => (
-                    <motion.span
-                      key={i}
-                      initial={{ y: 100, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      transition={{
-                        delay: i * 0.03,
-                        type: "spring",
-                        stiffness: 150,
-                        damping: 25,
-                      }}
-                      className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-300"
-                    >
-                      {char === " " ? "\u00A0" : char}
-                    </motion.span>
+                <span className="block mb-2 sm:mb-4">
+                  {"Collaborative Coding,".split(" ").map((word, wordIndex) => (
+                    <span key={wordIndex} className="inline-block whitespace-nowrap mr-2 sm:mr-4">
+                      {word.split("").map((char, charIndex) => {
+                        const absoluteIndex = "Collaborative Coding,".split(" ").slice(0, wordIndex).join(" ").length + charIndex + (wordIndex > 0 ? 1 : 0);
+                        return (
+                          <motion.span
+                            key={charIndex}
+                            initial={{ y: 100, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{
+                              delay: absoluteIndex * 0.03,
+                              type: "spring",
+                              stiffness: 150,
+                              damping: 25,
+                            }}
+                            className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-300"
+                          >
+                            {char}
+                          </motion.span>
+                        );
+                      })}
+                    </span>
                   ))}
                 </span>
-                <span className="block bg-gradient-to-r from-primary via-primary/80 to-primary bg-clip-text text-transparent">
-                  {"Perfected in Real-Time".split("").map((char, i) => (
-                    <motion.span
-                      key={i}
-                      initial={{ y: 100, opacity: 0 }}
-                      animate={{ y: 0, opacity: 1 }}
-                      transition={{
-                        delay: 0.5 + i * 0.03,
-                        type: "spring",
-                        stiffness: 150,
-                        damping: 25,
-                      }}
-                      className="inline-block"
-                    >
-                      {char === " " ? "\u00A0" : char}
-                    </motion.span>
+                <span className="block bg-gradient-to-r from-primary via-primary/80 to-primary bg-clip-text text-transparent leading-tight">
+                  {"Perfected in Real-Time".split(" ").map((word, wordIndex) => (
+                    <span key={wordIndex} className="inline-block whitespace-nowrap mr-2 sm:mr-4">
+                      {word.split("").map((char, charIndex) => {
+                        const absoluteIndex = "Perfected in Real-Time".split(" ").slice(0, wordIndex).join(" ").length + charIndex + (wordIndex > 0 ? 1 : 0);
+                        return (
+                          <motion.span
+                            key={charIndex}
+                            initial={{ y: 100, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{
+                              delay: 0.5 + absoluteIndex * 0.03,
+                              type: "spring",
+                              stiffness: 150,
+                              damping: 25,
+                            }}
+                            className="inline-block"
+                          >
+                            {char}
+                          </motion.span>
+                        );
+                      })}
+                    </span>
                   ))}
                 </span>
               </motion.h1>
