@@ -69,7 +69,7 @@ function setRefreshTokenCookie(res: Response, token: string) {
   res.cookie('refreshToken', token, {
     httpOnly: true,
     secure: config.isProduction,
-    sameSite: 'strict',
+    sameSite: config.isProduction ? 'none' : 'lax',
     maxAge,
   });
 }
@@ -423,7 +423,7 @@ router.post('/logout', async (req: Request, res: Response) => {
     res.clearCookie('refreshToken', {
       httpOnly: true,
       secure: config.isProduction,
-      sameSite: 'strict',
+      sameSite: config.isProduction ? 'none' : 'lax',
     });
 
     res.json({
