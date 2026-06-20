@@ -59,6 +59,19 @@ export function createApp(): express.Application {
   app.use('/api/workspaces/:workspaceId/files/:fileId/versions', versionRoutes);
 
   // Root route
+  app.get('/', (_req, res) => {
+    res.json({
+      success: true,
+      data: {
+        name: 'Collaborative Code Editor API',
+        version: '0.1.0',
+        health: '/api/health',
+        documentation: '/api',
+      },
+    });
+  });
+
+  // API Root route
   app.get('/api', (_req, res) => {
     res.json({
       success: true,
