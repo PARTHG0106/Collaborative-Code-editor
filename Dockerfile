@@ -1,4 +1,4 @@
-FROM node:20-alpine AS builder
+FROM node:20-slim AS builder
 WORKDIR /app
 COPY package*.json ./
 COPY apps/server/package.json ./apps/server/
@@ -7,7 +7,7 @@ COPY . .
 RUN npm run db:generate --workspace=apps/server
 RUN npm run build --workspace=apps/server
 
-FROM node:20-alpine
+FROM node:20-slim
 WORKDIR /app
 COPY package*.json ./
 COPY apps/server/package.json ./apps/server/
