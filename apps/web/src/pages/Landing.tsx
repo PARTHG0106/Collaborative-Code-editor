@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { motion } from "framer-motion";
 import axios from "axios";
-import { useAuth } from "@/context/AuthContext";
+import { useAuth, apiClient } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -115,7 +115,7 @@ export const Landing: React.FC = () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await axios.get('/api/health');
+      const response = await apiClient.get('/health');
       if (response.data && response.data.success) {
         setHealth(response.data.data);
       } else {
