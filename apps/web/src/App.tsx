@@ -8,6 +8,7 @@ import Register from './pages/Register';
 import VerifyEmail from './pages/VerifyEmail';
 import Dashboard from './pages/Dashboard';
 import { FloatingPaths } from './components/ui/FloatingPaths';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import './App.css';
 
 function App() {
@@ -41,6 +42,7 @@ function App() {
             </Routes>
           </div>
         </div>
+        <SpeedInsights />
       </AuthProvider>
     </BrowserRouter>
   );
