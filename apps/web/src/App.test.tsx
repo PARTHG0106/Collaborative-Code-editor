@@ -82,7 +82,7 @@ describe('Frontend App Component & Auth Flows', () => {
     render(<App />);
 
     expect(screen.getByText('SyncScript')).toBeInTheDocument();
-    expect(screen.getByText(/Collaborative Coding/i)).toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.textContent === 'CollaborativeCoding,')).toBeInTheDocument();
     expect(screen.getByText('Querying API status...')).toBeInTheDocument();
   });
 

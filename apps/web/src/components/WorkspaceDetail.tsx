@@ -179,6 +179,9 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
   const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
   const [renamingName, setRenamingName] = useState('');
 
+  // Mobile responsive state for file tree sidebar
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
   // Chat States
   const [rightSidebarTab, setRightSidebarTab] = useState<'chat' | 'versions' | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
@@ -608,6 +611,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
     setActiveFileId(file.id);
     setEditorContent(file.content || '');
     setSaveStatus('saved');
+    setIsSidebarOpen(false);
   };
 
   const handleCreateFile = async (name: string, type: 'FILE' | 'FOLDER', parentId: string | null) => {
@@ -1115,35 +1119,44 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
       {activeTab === 'editor' ? (
         <div className="workspace-ide-container glass-card">
           {/* File Explorer Sidebar */}
-          <aside className="workspace-sidebar">
+          <aside className={`workspace-sidebar ${isSidebarOpen ? 'open' : ''}`}>
             <div className="explorer-header">
               <span className="explorer-title">Files</span>
-              {canModifySettings && (
-                <div className="explorer-actions">
-                  <button 
-                    className="explorer-action-btn" 
-                    title="New File"
-                    onClick={() => {
-                      setNewItemType('FILE');
-                      setNewItemParentId(null);
-                      setNewItemName('');
-                    }}
-                  >
-                    <FilePlus size={16} />
-                  </button>
-                  <button 
-                    className="explorer-action-btn" 
-                    title="New Folder"
-                    onClick={() => {
-                      setNewItemType('FOLDER');
-                      setNewItemParentId(null);
-                      setNewItemName('');
-                    }}
-                  >
-                    <FolderPlus size={16} />
-                  </button>
-                </div>
-              )}
+              <div className="explorer-actions">
+                <button 
+                  className="close-sidebar-mobile-btn explorer-action-btn"
+                  title="Close Explorer"
+                  onClick={() => setIsSidebarOpen(false)}
+                >
+                  <X size={16} />
+                </button>
+                {canModifySettings && (
+                  <>
+                    <button 
+                      className="explorer-action-btn" 
+                      title="New File"
+                      onClick={() => {
+                        setNewItemType('FILE');
+                        setNewItemParentId(null);
+                        setNewItemName('');
+                      }}
+                    >
+                      <FilePlus size={16} />
+                    </button>
+                    <button 
+                      className="explorer-action-btn" 
+                      title="New Folder"
+                      onClick={() => {
+                        setNewItemType('FOLDER');
+                        setNewItemParentId(null);
+                        setNewItemName('');
+                      }}
+                    >
+                      <FolderPlus size={16} />
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             <div className="file-tree-container">
@@ -1203,10 +1216,19 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
             {activeFileId ? (
               <>
                 <div className="editor-header">
-                  <div className="editor-active-tab">
-                    <File size={14} className="text-purple-400" />
-                    <span>{activeFile?.name}</span>
-                    <span className="text-xs text-gray-500 ml-2">({editorLanguage})</span>
+                  <div className="flex items-center gap-2 h-full">
+                    <button 
+                      className="sidebar-toggle-mobile-btn explorer-action-btn"
+                      onClick={() => setIsSidebarOpen(prev => !prev)}
+                      title="Toggle File Explorer"
+                    >
+                      <AlignLeft size={16} />
+                    </button>
+                    <div className="editor-active-tab">
+                      <File size={14} className="text-purple-400" />
+                      <span>{activeFile?.name}</span>
+                      <span className="text-xs text-gray-500 ml-2">({editorLanguage})</span>
+                    </div>
                   </div>
                   
                   <div className="editor-header-actions">

@@ -111,7 +111,7 @@ export const VerifyEmail: React.FC = () => {
         }}
       />
 
-      <div className="auth-card glass-card relative z-10 max-w-[440px] w-full p-10 bg-background/50 backdrop-blur-lg border border-border/50 shadow-glow rounded-2xl flex flex-col gap-6">
+      <div className="auth-card glass-card relative z-10 max-w-[440px] w-full p-6 sm:p-10 bg-background/50 backdrop-blur-lg border border-border/50 shadow-glow rounded-2xl flex flex-col gap-6">
         <div className="auth-header-content text-center flex flex-col items-center gap-3">
           <div className="auth-brand inline-flex items-center gap-2">
             <div className="text-xl font-bold bg-gradient-to-r from-primary to-[#a855f7] bg-clip-text text-transparent brand-logo">&lt;/&gt;</div>

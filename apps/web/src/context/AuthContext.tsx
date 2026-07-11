@@ -117,8 +117,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Initial session restoration: check if user is already logged in
   const restoreSession = useCallback(async () => {
+    const localRefreshToken = localStorage.getItem('refreshToken');
+    if (!localRefreshToken) {
+      setLoading(false);
+      return;
+    }
+
     try {
-      const localRefreshToken = localStorage.getItem('refreshToken');
       // Try to get a fresh access token using the HTTP-only cookie or local storage token
       const refreshRes = await axios.post(
         `${VITE_API_URL}/auth/refresh`,
