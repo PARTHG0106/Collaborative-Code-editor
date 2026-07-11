@@ -53,7 +53,7 @@ router.get('/', async (req: WorkspaceRequest, res: Response, next: NextFunction)
       },
     });
 
-    const workspaces = members.map((m) => ({
+    const workspaces = members.map((m: any) => ({
       id: m.workspace.id,
       name: m.workspace.name,
       description: m.workspace.description,
@@ -83,7 +83,7 @@ router.post('/', async (req: WorkspaceRequest, res: Response, next: NextFunction
     const body = createWorkspaceSchema.parse(req.body);
 
     // Create workspace and owner membership record in a single transaction
-    const workspace = await prisma.$transaction(async (tx) => {
+    const workspace = await prisma.$transaction(async (tx: any) => {
       const ws = await tx.workspace.create({
         data: {
           name: body.name,
@@ -170,7 +170,7 @@ router.get(
         createdAt: workspace.createdAt,
         updatedAt: workspace.updatedAt,
         currentUserRole: req.workspaceMember!.role,
-        members: workspace.members.map((m) => ({
+        members: workspace.members.map((m: any) => ({
           userId: m.user.id,
           name: m.user.name,
           email: m.user.email,
