@@ -2,7 +2,7 @@ import { defineComputeConfig } from "@prisma/compute-sdk/config";
 
 export default defineComputeConfig({
   apps: {
-    "collaborative-code-editor": {
+    "@collab/server": {
       root: "apps/server",
       framework: "bun",
       entry: "src/index.ts",
