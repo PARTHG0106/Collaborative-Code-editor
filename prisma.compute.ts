@@ -6,6 +6,7 @@ export default defineComputeConfig({
       root: "apps/server",
       framework: "bun",
       entry: "src/index.ts",
+      httpPort: 4000,
     },
   },
 });
