@@ -28,7 +28,7 @@ async function main(): Promise<void> {
     try {
       const testPool = new pg.Pool({
         connectionString: config.databaseUrl,
-        ssl: { rejectUnauthorized: false },
+        ...(config.databaseSsl ? { ssl: { rejectUnauthorized: false } } : {}),
         max: 1,
         connectionTimeoutMillis: 10000,
       });

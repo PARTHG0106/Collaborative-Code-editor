@@ -1,9 +1,16 @@
 import { PrismaClient } from '../generated/client/index.js';
 import { PrismaPg } from '@prisma/adapter-pg';
+import pg from 'pg';
 import { config } from '../config/index.js';
 
-// Instantiate the adapter — Prisma v7 PrismaPg manages Pool internally
-const adapter = new PrismaPg({ connectionString: config.databaseUrl });
+// Create pool with explicit SSL handling (pg v8 overrides ssl when sslmode is in URL)
+const pool = new pg.Pool({
+  connectionString: config.databaseUrl,
+  ...(config.databaseSsl ? { ssl: { rejectUnauthorized: false } } : {}),
+});
+
+// Instantiate the adapter
+const adapter = new PrismaPg(pool as any);
 
 /**
  * Singleton Prisma client instance.

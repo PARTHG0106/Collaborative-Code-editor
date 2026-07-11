@@ -14,8 +14,20 @@ export const config = {
   /** Node environment */
   nodeEnv: process.env.NODE_ENV || 'development',
 
-  /** Database URL */
-  databaseUrl: process.env.DATABASE_URL || '',
+  /** Database URL (sslmode stripped — we handle SSL in code to avoid pg v8 verify-full override) */
+  databaseUrl: (() => {
+    const raw = process.env.DATABASE_URL || '';
+    try {
+      const u = new URL(raw);
+      u.searchParams.delete('sslmode');
+      return u.toString();
+    } catch {
+      return raw;
+    }
+  })(),
+
+  /** Whether DATABASE_URL originally had sslmode */
+  databaseSsl: (process.env.DATABASE_URL || '').includes('sslmode='),
 
   /** CORS allowed origins */
   corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:5173'],
