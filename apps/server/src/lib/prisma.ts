@@ -6,6 +6,9 @@ import { config } from '../config/index.js';
 // Create a native pg Pool
 const pool = new pg.Pool({
   connectionString: config.databaseUrl,
+  ssl: {
+    rejectUnauthorized: false,
+  },
 });
 
 // Instantiate the adapter
