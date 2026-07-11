@@ -1,18 +1,9 @@
 import { PrismaClient } from '../generated/client/index.js';
 import { PrismaPg } from '@prisma/adapter-pg';
-import pg from 'pg';
 import { config } from '../config/index.js';
 
-// Create a native pg Pool
-const pool = new pg.Pool({
-  connectionString: config.databaseUrl,
-  ssl: {
-    rejectUnauthorized: false,
-  },
-});
-
-// Instantiate the adapter
-const adapter = new PrismaPg(pool as any);
+// Instantiate the adapter — Prisma v7 PrismaPg manages Pool internally
+const adapter = new PrismaPg({ connectionString: config.databaseUrl });
 
 /**
  * Singleton Prisma client instance.
