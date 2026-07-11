@@ -1,16 +1,14 @@
 import { PrismaClient } from '../generated/client/index.js';
 import { PrismaPg } from '@prisma/adapter-pg';
-import pg from 'pg';
 import { config } from '../config/index.js';
 
-// Create pool with explicit SSL handling (pg v8 overrides ssl when sslmode is in URL)
-const pool = new pg.Pool({
+// Pass PoolConfig to PrismaPg — it creates its own Pool internally.
+// We pass ssl: { rejectUnauthorized: false } to handle Supabase certs,
+// and use config.databaseUrl which has sslmode stripped from the query string.
+const adapter = new PrismaPg({
   connectionString: config.databaseUrl,
   ...(config.databaseSsl ? { ssl: { rejectUnauthorized: false } } : {}),
 });
-
-// Instantiate the adapter
-const adapter = new PrismaPg(pool as any);
 
 /**
  * Singleton Prisma client instance.
