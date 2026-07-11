@@ -113,7 +113,7 @@ export const Landing: React.FC = () => {
     {
       icon: <Code2 className="w-6 h-6 text-primary" />,
       title: "Real-Time Sync",
-      description: "Code together in real-time with zero latency. See changes instantly as your team collaborates.",
+      description: "Code together in real-time with low latency. See changes instantly as your team collaborates.",
     },
     {
       icon: <Users className="w-6 h-6 text-primary" />,
@@ -134,11 +134,6 @@ export const Landing: React.FC = () => {
       icon: <Zap className="w-6 h-6 text-primary" />,
       title: "Lightning Fast",
       description: "Optimized for performance with instant loading and smooth editing experience.",
-    },
-    {
-      icon: <Shield className="w-6 h-6 text-primary" />,
-      title: "Secure & Private",
-      description: "Enterprise-grade security with end-to-end encryption and SOC 2 compliance.",
     },
   ];
 
