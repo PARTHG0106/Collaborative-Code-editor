@@ -24,7 +24,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Create custom Axios client for authenticated API requests
-const VITE_API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:4000/api';
+const VITE_API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api';
 
 export const apiClient = axios.create({
   baseURL: VITE_API_URL,

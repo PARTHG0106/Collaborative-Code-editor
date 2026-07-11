@@ -346,7 +346,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
   // Connect and join workspace room
   useEffect(() => {
     const token = localStorage.getItem('accessToken');
-    const wsUrl = (import.meta as any).env?.VITE_WS_URL || 'http://localhost:4000';
+    const wsUrl = (import.meta as any).env?.VITE_WS_URL || 'http://localhost:3000';
     const socket = io(wsUrl, {
       auth: { token }
     });
