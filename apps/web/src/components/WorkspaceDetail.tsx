@@ -1335,6 +1335,13 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                 <Terminal size={48} className="text-purple-500 opacity-60 mb-2" />
                 <h3>No File Opened</h3>
                 <p>Select an existing file from the explorer sidebar or create a new one to start collaborating.</p>
+                <button 
+                  className="btn btn-primary welcome-toggle-btn"
+                  onClick={() => setIsSidebarOpen(true)}
+                >
+                  <AlignLeft size={16} />
+                  <span>Open File Explorer</span>
+                </button>
               </div>
             )}
           </main>

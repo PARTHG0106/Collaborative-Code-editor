@@ -1863,6 +1863,19 @@
   margin: 0;
 }
 
+.welcome-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+@media (min-width: 769px) {
+  .welcome-toggle-btn {
+    display: none;
+  }
+}
+
 .editor-header {
   height: 44px;
   background: #08090c;
