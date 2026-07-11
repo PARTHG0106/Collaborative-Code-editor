@@ -26,7 +26,7 @@ async function main(): Promise<void> {
     initSocketServer(server);
     console.info('🔌 Socket.IO server initialized');
 
-    server.listen(config.port, () => {
+    server.listen(config.port, '0.0.0.0', () => {
       console.info(`
   ╔══════════════════════════════════════════════╗
   ║   Collaborative Code Editor API Server       ║
