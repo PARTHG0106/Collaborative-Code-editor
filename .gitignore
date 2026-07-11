@@ -47,3 +47,6 @@ docker-data/
 
 # Misc
 *.tsbuildinfo
+
+# Custom generated client
+apps/server/src/generated/
