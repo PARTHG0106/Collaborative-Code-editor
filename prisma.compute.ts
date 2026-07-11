@@ -4,7 +4,7 @@ export default defineComputeConfig({
   apps: {
     "@collab/server": {
       root: "apps/server",
-      framework: "bun",
+      framework: "hono",
       entry: "src/index.ts",
       httpPort: 3000,
     },
