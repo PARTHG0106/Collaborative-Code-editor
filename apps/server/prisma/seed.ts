@@ -1,6 +1,12 @@
 import { PrismaClient } from '../src/generated/client/index.js';
+import { PrismaPg } from '@prisma/adapter-pg';
+import pg from 'pg';
 
-const prisma = new PrismaClient();
+const connectionString = process.env.DATABASE_URL;
+const pool = new pg.Pool({ connectionString });
+const adapter = new PrismaPg(pool as any);
+
+const prisma = new PrismaClient({ adapter });
 
 async function main() {
   console.info('🌱 Seeding database...');
