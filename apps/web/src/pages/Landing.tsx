@@ -13,7 +13,6 @@ import {
   History, 
   MessageSquare, 
   Zap, 
-  Shield, 
   GitBranch,
   CheckCircle2,
   ArrowRight,
