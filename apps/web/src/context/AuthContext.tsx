@@ -28,7 +28,6 @@ const VITE_API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost
 
 export const apiClient = axios.create({
   baseURL: VITE_API_URL,
-  withCredentials: true, // Crucial for sending/receiving HTTP-only cookies
   headers: {
     'Content-Type': 'application/json',
   },
@@ -82,8 +81,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             // Attempt to refresh the access token using the HTTP-only refresh cookie or local storage token
             const response = await axios.post(
               `${VITE_API_URL}/auth/refresh`,
-              { refreshToken: localRefreshToken },
-              { withCredentials: true }
+              { refreshToken: localRefreshToken }
             );
 
             if (response.data && response.data.success) {
@@ -127,8 +125,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Try to get a fresh access token using the HTTP-only cookie or local storage token
       const refreshRes = await axios.post(
         `${VITE_API_URL}/auth/refresh`,
-        { refreshToken: localRefreshToken },
-        { withCredentials: true }
+        { refreshToken: localRefreshToken }
       );
 
       if (refreshRes.data && refreshRes.data.success) {
