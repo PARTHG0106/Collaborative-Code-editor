@@ -51,49 +51,85 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
         data: { status: 'RUNNING', startedAt: new Date() },
       });
 
-      // Map standard languages to Piston API parameters
-      const pistonLangMap: Record<string, string> = {
-        c: 'c', cpp: 'cpp', java: 'java', python: 'python',
-        javascript: 'javascript', typescript: 'typescript',
-        go: 'go', rust: 'rust', php: 'php', ruby: 'ruby'
-      };
-
-      const pistonLang = pistonLangMap[language];
-
-      if (!pistonLang) {
-        throw new Error(`Remote execution not supported for language: ${language}`);
+      // Execute natively on the backend server
+      const { execSync, spawn } = require('child_process');
+      const fs = require('fs');
+      const path = require('path');
+      const os = require('os');
+      
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'syncscript-exec-'));
+      let compileCmd = null;
+      let runCmd = '';
+      let runArgs: string[] = [];
+      let sourceFile = '';
+      
+      if (language === 'cpp' || language === 'c') {
+        const ext = language === 'cpp' ? 'cpp' : 'c';
+        const compiler = language === 'cpp' ? 'g++' : 'gcc';
+        sourceFile = path.join(tmpDir, `main.${ext}`);
+        const outFile = path.join(tmpDir, 'main.out');
+        fs.writeFileSync(sourceFile, code);
+        compileCmd = `${compiler} ${sourceFile} -o ${outFile}`;
+        runCmd = outFile;
+      } else if (language === 'python') {
+        sourceFile = path.join(tmpDir, 'main.py');
+        fs.writeFileSync(sourceFile, code);
+        runCmd = 'python3';
+        runArgs = [sourceFile];
+      } else if (language === 'javascript') {
+        sourceFile = path.join(tmpDir, 'main.js');
+        fs.writeFileSync(sourceFile, code);
+        runCmd = 'node';
+        runArgs = [sourceFile];
+      } else if (language === 'java') {
+        sourceFile = path.join(tmpDir, 'Main.java');
+        fs.writeFileSync(sourceFile, code);
+        compileCmd = `javac ${sourceFile}`;
+        runCmd = 'java';
+        runArgs = ['-cp', tmpDir, 'Main'];
+      } else {
+        throw new Error(`Native remote execution not implemented for language: ${language}`);
       }
 
-      // Execute on Piston Public API
-      const response = await fetch('https://emkc.org/api/v2/piston/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          language: pistonLang,
-          version: '*', // Use latest available version
-          files: [{ content: code }]
-        })
-      });
+      let exitCode = 0;
 
-      const result = await response.json() as any;
-
-      let exitCode = 1;
-      let durationMs = 0;
-
-      if (result.compile && result.compile.stderr) {
-        io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: result.compile.stderr + '\n', timestamp: Date.now() });
-      }
-
-      if (result.run) {
-        if (result.run.stdout) {
-          io.to(`exec:${session.id}`).emit('execution:stdout', { sessionId: session.id, data: result.run.stdout + (result.run.stdout.endsWith('\n') ? '' : '\n'), timestamp: Date.now() });
+      try {
+        if (compileCmd) {
+          try {
+            execSync(compileCmd, { stdio: 'pipe' });
+          } catch (e: any) {
+            io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: (e.stderr ? e.stderr.toString() : e.message) + '\n', timestamp: Date.now() });
+            throw e;
+          }
         }
-        if (result.run.stderr) {
-          io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: result.run.stderr + (result.run.stderr.endsWith('\n') ? '' : '\n'), timestamp: Date.now() });
-        }
-        exitCode = result.run.code || 0;
-      } else if (result.message) {
-        io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: result.message + '\n', timestamp: Date.now() });
+
+        await new Promise<void>((resolve, reject) => {
+          const proc = spawn(runCmd, runArgs, { cwd: tmpDir });
+          
+          proc.stdout.on('data', (data: Buffer) => {
+            io.to(`exec:${session.id}`).emit('execution:stdout', { sessionId: session.id, data: data.toString(), timestamp: Date.now() });
+          });
+          
+          proc.stderr.on('data', (data: Buffer) => {
+            io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: data.toString(), timestamp: Date.now() });
+          });
+
+          proc.on('close', (code: number) => {
+            exitCode = code;
+            resolve();
+          });
+
+          proc.on('error', (err: Error) => {
+            io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: err.message + '\n', timestamp: Date.now() });
+            exitCode = 1;
+            resolve();
+          });
+        });
+
+      } catch (err) {
+        exitCode = 1;
+      } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
       }
 
       await prisma.executionSession.update({
@@ -107,7 +143,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
       io.to(`exec:${session.id}`).emit('execution:completed', {
         sessionId: session.id,
         exitCode,
-        durationMs,
+        durationMs: 0,
         target: 'remote',
       });
     } catch (err) {

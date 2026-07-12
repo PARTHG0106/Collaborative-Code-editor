@@ -8,7 +8,7 @@ RUN npm run build --workspace=apps/server
 RUN cp -r apps/server/src/generated apps/server/dist/generated
 
 FROM node:20-slim
-RUN apt-get update -y && apt-get install -y openssl ca-certificates
+RUN apt-get update -y && apt-get install -y openssl ca-certificates g++ python3 default-jdk golang
 WORKDIR /app
 COPY --from=builder /app ./
 EXPOSE 7860
