@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { IDEThemeProvider, useTheme } from './IDEThemeProvider';
@@ -12,10 +12,14 @@ import { SettingsPanel } from './sidebar/SettingsPanel';
 import { RightPanel } from './RightPanel';
 import { useFileSystem, FileSystemItem } from './hooks/useFileSystem';
 import { useWorkspaceSocket } from './hooks/useWorkspaceSocket';
+import { ExecutionOrchestrator, getLangFromFilename } from '../../lib/execution/ExecutionOrchestrator';
+import { TerminalPanel } from '../../lib/execution/terminal/TerminalPanel';
+import { TerminalManager } from '../../lib/execution/terminal/TerminalManager';
+import { ExecutionTarget } from '../../lib/execution/types';
 import Editor from '@monaco-editor/react';
 import { io, Socket } from 'socket.io-client';
 import {
-  File, X, Terminal, Loader2, Play
+  File, X, Terminal as TerminalIcon, Loader2, Play, Square
 } from 'lucide-react';
 import './IDELayout.css';
 
@@ -47,15 +51,7 @@ const ensureCursorStyle = (userId: string, name: string) => {
   document.head.appendChild(style);
 };
 
-const getJudge0LanguageId = (name: string) => {
-  const ext = name.split('.').pop()?.toLowerCase();
-  const map: Record<string, number> = {
-    js: 93, jsx: 93, ts: 74, tsx: 74,
-    py: 71, c: 50, cpp: 54, java: 62,
-    cs: 51, go: 60, rs: 73, rb: 72, php: 68
-  };
-  return map[ext || ''] || null;
-};
+
 
 // --- Workspace Details interface ---
 interface WorkspaceDetails {
@@ -88,8 +84,10 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
 
   // Execution state
   const [terminalOpen, setTerminalOpen] = useState(false);
-  const [terminalOutput, setTerminalOutput] = useState('');
   const [isExecuting, setIsExecuting] = useState(false);
+  const [executionTarget, setExecutionTarget] = useState<ExecutionTarget | null>(null);
+  const orchestratorRef = useRef(new ExecutionOrchestrator());
+  const terminalManagerRef = useRef<TerminalManager | null>(null);
 
   // File system hook
   const fs = useFileSystem(workspaceId);
@@ -349,69 +347,49 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     const file = fs.files.find(f => f.id === fs.activeFileId);
     if (!file) return;
 
-    const langId = getJudge0LanguageId(file.name);
-    if (!langId) {
+    const lang = getLangFromFilename(file.name);
+    if (!lang) {
       setTerminalOpen(true);
-      setTerminalOutput(`Execution for this file type is not supported yet.\nLanguage ID not found for extension: ${file.name.split('.').pop()}`);
+      terminalManagerRef.current?.clear();
+      terminalManagerRef.current?.writeStderr(`Unsupported file type: .${file.name.split('.').pop()}\r\n`);
       return;
     }
 
     setIsExecuting(true);
     setTerminalOpen(true);
-    setTerminalOutput('Compiling and running...');
+    terminalManagerRef.current?.clear();
 
-    try {
-      const baseUrl = (import.meta as any).env?.VITE_JUDGE0_API_URL || 'https://ce.judge0.com';
-      const apiKey = (import.meta as any).env?.VITE_JUDGE0_API_KEY;
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (apiKey) {
-        headers['X-RapidAPI-Key'] = apiKey;
-        headers['X-RapidAPI-Host'] = baseUrl.replace('https://', '').split('/')[0];
+    const target = orchestratorRef.current.selectTarget(lang);
+    setExecutionTarget(target);
+
+    await orchestratorRef.current.execute(
+      file.name,
+      editorContent,
+      {
+        onStdout: (data) => terminalManagerRef.current?.writeStdout(data),
+        onStderr: (data) => terminalManagerRef.current?.writeStderr(data),
+        onRequestInput: () => {
+          terminalManagerRef.current?.promptInput((input) => {
+            orchestratorRef.current.sendInput(input);
+          });
+        },
+        onExit: (code) => {
+          setIsExecuting(false);
+          setExecutionTarget(null);
+          const color = code === 0 ? '\x1b[32m' : '\x1b[31m';
+          terminalManagerRef.current?.writeStdout(
+            `\r\n${color}[Process exited with code ${code}]\x1b[0m\r\n`
+          );
+        },
       }
+    );
+  };
 
-      // Step 1: Create submission
-      const subRes = await fetch(`${baseUrl}/submissions?base64_encoded=false&wait=false`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          source_code: editorContent,
-          language_id: langId
-        })
-      });
-
-      if (!subRes.ok) throw new Error('Failed to create submission');
-      const { token } = await subRes.json();
-
-      // Step 2: Poll for results
-      let result = null;
-      for (let i = 0; i < 20; i++) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        const checkRes = await fetch(`${baseUrl}/submissions/${token}?base64_encoded=false`, { headers });
-        if (!checkRes.ok) throw new Error('Failed to check submission');
-        const checkData = await checkRes.json();
-        
-        if (checkData.status.id >= 3) {
-          result = checkData;
-          break;
-        }
-      }
-
-      if (!result) {
-        setTerminalOutput('Execution timed out.');
-      } else {
-        const output = [
-          result.compile_output,
-          result.stdout,
-          result.stderr
-        ].filter(Boolean).join('\n');
-        
-        setTerminalOutput(output || (result.status.id === 3 ? 'Program finished successfully with no output.' : `Status: ${result.status.description}`));
-      }
-    } catch (err: any) {
-      setTerminalOutput(`Error: ${err.message || 'Execution failed.'}`);
-    } finally {
-      setIsExecuting(false);
-    }
+  const handleStopCode = () => {
+    orchestratorRef.current.cancel();
+    setIsExecuting(false);
+    setExecutionTarget(null);
+    terminalManagerRef.current?.writeStderr('\r\n[Execution cancelled]\r\n');
   };
 
   // Loading state
@@ -491,17 +469,28 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
               </button>
             ))}
             
-            {/* Run Button */}
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: '8px' }}>
-              <button 
-                className="ide-btn" 
-                style={{ height: '24px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
-                onClick={handleRunCode}
-                disabled={isExecuting || !fs.activeFileId}
-              >
-                {isExecuting ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
-                Run
-              </button>
+            {/* Run / Stop Button */}
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: '8px', gap: '4px' }}>
+              {isExecuting ? (
+                <button 
+                  className="ide-btn" 
+                  style={{ height: '24px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', background: 'var(--ide-danger)', color: '#fff' }}
+                  onClick={handleStopCode}
+                >
+                  <Square size={10} fill="currentColor" />
+                  Stop
+                </button>
+              ) : (
+                <button 
+                  className="ide-btn" 
+                  style={{ height: '24px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
+                  onClick={handleRunCode}
+                  disabled={!fs.activeFileId}
+                >
+                  <Play size={12} />
+                  Run
+                </button>
+              )}
             </div>
           </div>
 
@@ -534,24 +523,20 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
             </div>
           ) : (
             <div className="ide-welcome">
-              <Terminal size={40} style={{ opacity: 0.3, color: 'var(--ide-accent)' }} />
+              <TerminalIcon size={40} style={{ opacity: 0.3, color: 'var(--ide-accent)' }} />
               <h3>SyncScript</h3>
               <p>Select a file from the explorer to start editing, or create a new file.</p>
             </div>
           )}
 
-          {/* Execution Terminal Panel */}
-          {terminalOpen && (
-            <div className="ide-terminal-panel" style={{ height: '30%', minHeight: '150px', borderTop: '1px solid var(--ide-border)', backgroundColor: 'var(--ide-bg-darker)', display: 'flex', flexDirection: 'column' }}>
-              <div className="ide-terminal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 12px', borderBottom: '1px solid var(--ide-border)', backgroundColor: 'var(--ide-bg)', fontSize: '12px', color: 'var(--ide-text-muted)' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Terminal size={12} /> OUTPUT</div>
-                <button className="ide-icon-btn" onClick={() => setTerminalOpen(false)}><X size={14} /></button>
-              </div>
-              <div className="ide-terminal-body" style={{ padding: '8px 12px', flex: 1, overflowY: 'auto', fontFamily: 'var(--ide-font-mono), monospace', fontSize: '13px', whiteSpace: 'pre-wrap', color: 'var(--ide-text)' }}>
-                {terminalOutput}
-              </div>
-            </div>
-          )}
+          {/* xterm.js Terminal Panel */}
+          <TerminalPanel
+            visible={terminalOpen}
+            onClose={() => setTerminalOpen(false)}
+            executionTarget={executionTarget}
+            isRunning={isExecuting}
+            onTerminalReady={(manager) => { terminalManagerRef.current = manager; }}
+          />
 
           {/* Status Bar */}
           <div className="ide-statusbar">
