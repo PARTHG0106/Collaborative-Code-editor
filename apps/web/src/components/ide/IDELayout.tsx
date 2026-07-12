@@ -17,7 +17,7 @@ import { TerminalPanel } from '../../lib/execution/terminal/TerminalPanel';
 import { TerminalManager } from '../../lib/execution/terminal/TerminalManager';
 import { AgentConnector } from '../../lib/execution/AgentConnector';
 import { ExecutionTarget } from '../../lib/execution/types';
-import { NotebookRenderer, NotebookCell } from '../../lib/execution/notebook/NotebookRenderer';
+import { NotebookRenderer, NotebookCell, CellOutput } from '../../lib/execution/notebook/NotebookRenderer';
 import { parseNotebook, serializeNotebook, NotebookKernel } from '../../lib/execution/notebook/NotebookExecutor';
 import Editor from '@monaco-editor/react';
 import { io, Socket } from 'socket.io-client';
@@ -505,9 +505,11 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     const cell = notebookCells.find(c => c.id === id);
     if (!cell || cell.type !== 'code') return;
 
+    let finalOutputs: CellOutput[] = [];
     await notebookKernelRef.current.runCell(
       cell,
       (outputs) => {
+        finalOutputs = outputs;
         setNotebookCells(cells => cells.map(c => c.id === id ? { ...c, outputs } : c));
       },
       () => {
@@ -517,14 +519,17 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
       }
     );
 
-    setNotebookCells(cells => cells.map(c => c.id === id ? { 
-      ...c, 
-      isRunning: false,
-      executionCount: notebookKernelRef.current?.getExecutionCount() || null
-    } : c));
-    
-    // Sync final outputs to file
-    syncNotebookToEditor(notebookCells.map(c => c.id === id ? { ...c, isRunning: false } : c));
+    setNotebookCells(cells => {
+      const newCells = cells.map(c => c.id === id ? { 
+        ...c, 
+        outputs: finalOutputs,
+        isRunning: false,
+        executionCount: notebookKernelRef.current?.getExecutionCount() || null
+      } : c);
+      // Sync final outputs to file immediately after state calculation
+      setTimeout(() => syncNotebookToEditor(newCells), 0);
+      return newCells;
+    });
   };
 
   const handleRunAllCells = async () => {
@@ -656,6 +661,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
               ) : (
                 <Editor
                   height="100%"
+                  path={fs.activeFileId}
                   language={editorLang}
                   theme={theme === 'dark' ? 'vs-dark' : 'vs'}
                   value={editorContent}
