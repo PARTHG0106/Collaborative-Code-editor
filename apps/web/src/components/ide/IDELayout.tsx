@@ -17,6 +17,8 @@ import { TerminalPanel } from '../../lib/execution/terminal/TerminalPanel';
 import { TerminalManager } from '../../lib/execution/terminal/TerminalManager';
 import { AgentConnector } from '../../lib/execution/AgentConnector';
 import { ExecutionTarget } from '../../lib/execution/types';
+import { NotebookRenderer, NotebookCell } from '../../lib/execution/notebook/NotebookRenderer';
+import { parseNotebook, serializeNotebook, NotebookKernel } from '../../lib/execution/notebook/NotebookExecutor';
 import Editor from '@monaco-editor/react';
 import { io, Socket } from 'socket.io-client';
 import {
@@ -91,6 +93,10 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const orchestratorRef = useRef(new ExecutionOrchestrator());
   const terminalManagerRef = useRef<TerminalManager | null>(null);
   const agentRef = useRef(new AgentConnector());
+  
+  // Notebook state
+  const [notebookCells, setNotebookCells] = useState<NotebookCell[]>([]);
+  const notebookKernelRef = useRef<NotebookKernel | null>(null);
 
   // Auto-detect local agent on mount
   useEffect(() => {
@@ -264,6 +270,21 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
 
   // Auto-save
   useEffect(() => {
+    if (fs.activeFileId) {
+      const activeItem = fs.files.find(f => f.id === fs.activeFileId);
+      if (activeItem?.content) {
+        setEditorContent(activeItem.content);
+        if (activeItem.name.endsWith('.ipynb')) {
+          setNotebookCells(parseNotebook(activeItem.content));
+        }
+      } else {
+        setEditorContent('');
+        if (activeItem?.name.endsWith('.ipynb')) setNotebookCells([]);
+      }
+    }
+  }, [fs.activeFileId]);
+
+  useEffect(() => {
     if (!fs.activeFileId) return;
     const file = fs.files.find(f => f.id === fs.activeFileId);
     if (!file || file.content === editorContent) { fs.setSaveStatus('saved'); return; }
@@ -428,6 +449,88 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     terminalManagerRef.current?.writeStderr('\r\n[Execution cancelled]\r\n');
   };
 
+  // --- Notebook Handlers ---
+  const syncNotebookToEditor = (cells: NotebookCell[]) => {
+    setNotebookCells(cells);
+    const serialized = serializeNotebook(cells);
+    setEditorContent(serialized);
+    if (socketRef.current && fs.activeFileId) {
+      socketRef.current.emit('edit_file', {
+        fileId: fs.activeFileId,
+        baseVersion: localVersionRef.current,
+        edit: { offset: 0, text: serialized, length: editorContent.length }
+      });
+      localVersionRef.current += 1;
+      fs.setSaveStatus('unsaved');
+    }
+  };
+
+  const handleCellChange = (id: string, source: string) => {
+    const newCells = notebookCells.map(c => c.id === id ? { ...c, source } : c);
+    syncNotebookToEditor(newCells);
+  };
+
+  const handleAddCell = (afterId: string, type: 'code' | 'markdown') => {
+    const idx = notebookCells.findIndex(c => c.id === afterId);
+    const newCell: NotebookCell = { id: `cell-${Date.now()}`, type, source: '', outputs: [], executionCount: null, isRunning: false };
+    const newCells = [...notebookCells];
+    newCells.splice(idx >= 0 ? idx + 1 : newCells.length, 0, newCell);
+    syncNotebookToEditor(newCells);
+  };
+
+  const handleDeleteCell = (id: string) => {
+    const newCells = notebookCells.filter(c => c.id !== id);
+    syncNotebookToEditor(newCells);
+  };
+
+  const handleMoveCell = (id: string, direction: 'up' | 'down') => {
+    const idx = notebookCells.findIndex(c => c.id === id);
+    if (idx < 0) return;
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === notebookCells.length - 1) return;
+    
+    const newCells = [...notebookCells];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    [newCells[idx], newCells[targetIdx]] = [newCells[targetIdx], newCells[idx]];
+    syncNotebookToEditor(newCells);
+  };
+
+  const handleRunCell = async (id: string) => {
+    if (!notebookKernelRef.current) notebookKernelRef.current = new NotebookKernel();
+    
+    setNotebookCells(cells => cells.map(c => c.id === id ? { ...c, isRunning: true, outputs: [] } : c));
+    
+    const cell = notebookCells.find(c => c.id === id);
+    if (!cell || cell.type !== 'code') return;
+
+    await notebookKernelRef.current.runCell(
+      cell,
+      (outputs) => {
+        setNotebookCells(cells => cells.map(c => c.id === id ? { ...c, outputs } : c));
+      },
+      () => {
+        // Request input - show in terminal panel as a fallback or native prompt
+        const answer = window.prompt("Python input:");
+        notebookKernelRef.current?.sendInput(answer || '');
+      }
+    );
+
+    setNotebookCells(cells => cells.map(c => c.id === id ? { 
+      ...c, 
+      isRunning: false,
+      executionCount: notebookKernelRef.current?.getExecutionCount() || null
+    } : c));
+    
+    // Sync final outputs to file
+    syncNotebookToEditor(notebookCells.map(c => c.id === id ? { ...c, isRunning: false } : c));
+  };
+
+  const handleRunAllCells = async () => {
+    for (const cell of notebookCells) {
+      if (cell.type === 'code') await handleRunCell(cell.id);
+    }
+  };
+
   // Loading state
   if (loading) return <div className="ide-root ide-dark" style={{ alignItems: 'center', justifyContent: 'center' }}><Loader2 size={24} className="animate-spin" style={{ color: 'var(--ide-accent)' }} /></div>;
   if (!workspace) return <div className="ide-root ide-dark" style={{ alignItems: 'center', justifyContent: 'center', gap: 8 }}><span>Failed to load workspace</span><button className="ide-btn" onClick={onBack}>Back</button></div>;
@@ -519,9 +622,10 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
               ) : (
                 <button 
                   className="ide-btn" 
-                  style={{ height: '24px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
+                  style={{ height: '24px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', opacity: editorLang === 'jupyter' ? 0.5 : 1 }}
                   onClick={handleRunCode}
-                  disabled={!fs.activeFileId}
+                  disabled={!fs.activeFileId || editorLang === 'jupyter'}
+                  title={editorLang === 'jupyter' ? "Run cells individually in the notebook" : undefined}
                 >
                   <Play size={12} />
                   Run
@@ -533,29 +637,42 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           {/* Editor */}
           {fs.activeFileId && activeFile ? (
             <div className="ide-editor-body">
-              <Editor
-                height="100%"
-                language={editorLang}
-                theme={theme === 'dark' ? 'vs-dark' : 'vs'}
-                value={editorContent}
-                onChange={val => setEditorContent(val || '')}
-                onMount={handleEditorMount}
-                options={{
-                  minimap: { enabled: true },
-                  fontSize: 14,
-                  fontFamily: "var(--ide-font-mono), monospace",
-                  lineNumbers: 'on',
-                  roundedSelection: true,
-                  scrollBeyondLastLine: false,
-                  readOnly: !canModify,
-                  automaticLayout: true,
-                  tabSize: 2,
-                  insertSpaces: true,
-                  wordWrap: 'on',
-                  padding: { top: 12 },
-                }}
-                loading={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ide-text-muted)' }}><Loader2 size={20} className="animate-spin" /></div>}
-              />
+              {editorLang === 'jupyter' ? (
+                <NotebookRenderer
+                  cells={notebookCells}
+                  onCellChange={handleCellChange}
+                  onRunCell={handleRunCell}
+                  onRunAll={handleRunAllCells}
+                  onAddCell={handleAddCell}
+                  onDeleteCell={handleDeleteCell}
+                  onMoveCell={handleMoveCell}
+                  theme={theme}
+                />
+              ) : (
+                <Editor
+                  height="100%"
+                  language={editorLang}
+                  theme={theme === 'dark' ? 'vs-dark' : 'vs'}
+                  value={editorContent}
+                  onChange={val => setEditorContent(val || '')}
+                  onMount={handleEditorMount}
+                  options={{
+                    minimap: { enabled: true },
+                    fontSize: 14,
+                    fontFamily: "var(--ide-font-mono), monospace",
+                    lineNumbers: 'on',
+                    roundedSelection: true,
+                    scrollBeyondLastLine: false,
+                    readOnly: !canModify,
+                    automaticLayout: true,
+                    tabSize: 2,
+                    insertSpaces: true,
+                    wordWrap: 'on',
+                    padding: { top: 12 },
+                  }}
+                  loading={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ide-text-muted)' }}><Loader2 size={20} className="animate-spin" /></div>}
+                />
+              )}
             </div>
           ) : (
             <div className="ide-welcome">
