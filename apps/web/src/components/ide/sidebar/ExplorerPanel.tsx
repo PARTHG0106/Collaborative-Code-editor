@@ -3,7 +3,7 @@ import {
   Folder, File, FilePlus, FolderPlus, ChevronDown, ChevronRight,
   Edit2, Trash2, Upload, FolderUp
 } from 'lucide-react';
-import { FileSystemItem } from './hooks/useFileSystem';
+import { FileSystemItem } from '../hooks/useFileSystem';
 
 interface ExplorerPanelProps {
   files: FileSystemItem[];

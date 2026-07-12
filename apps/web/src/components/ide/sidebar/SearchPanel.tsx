@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Search, X, ToggleLeft, ToggleRight } from 'lucide-react';
-import { FileSystemItem } from './hooks/useFileSystem';
+import { FileSystemItem } from '../hooks/useFileSystem';
 
 interface SearchPanelProps {
   files: FileSystemItem[];
@@ -19,7 +19,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ files, onOpenFile }) =
       const lines = (file.content || '').split('\n');
       const matches: { line: number; text: string }[] = [];
 
-      lines.forEach((line, i) => {
+      lines.forEach((line: string, i: number) => {
         try {
           const found = useRegex
             ? new RegExp(query, 'i').test(line)
