@@ -594,19 +594,22 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
         <div className="ide-editor-area" onPointerDownCapture={handleEditorAreaClick}>
           {/* Tab Bar */}
           <div className="ide-tabs-bar">
-            {openTabs.map(tab => (
-              <button
-                key={tab.id}
-                className={`ide-tab ${fs.activeFileId === tab.id ? 'active' : ''}`}
-                onClick={() => selectFile(tab)}
-              >
-                <File size={12} style={{ color: 'var(--ide-accent)', flexShrink: 0 }} />
-                {tab.name}
-                <span className="ide-tab-close" onClick={e => { e.stopPropagation(); closeTab(tab.id); }}>
-                  <X size={10} />
-                </span>
-              </button>
-            ))}
+            <div style={{ display: 'flex', flex: 1, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+              {openTabs.map(tab => (
+                <button
+                  key={tab.id}
+                  className={`ide-tab ${fs.activeFileId === tab.id ? 'active' : ''}`}
+                  onClick={() => selectFile(tab)}
+                  style={{ flexShrink: 0 }}
+                >
+                  <File size={12} style={{ color: 'var(--ide-accent)', flexShrink: 0 }} />
+                  {tab.name}
+                  <span className="ide-tab-close" onClick={e => { e.stopPropagation(); closeTab(tab.id); }}>
+                    <X size={10} />
+                  </span>
+                </button>
+              ))}
+            </div>
             
             {/* Run / Stop Button */}
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: '8px', gap: '4px' }}>
