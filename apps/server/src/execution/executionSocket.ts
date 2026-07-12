@@ -75,7 +75,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
         })
       });
 
-      const result = await response.json();
+      const result = await response.json() as any;
 
       let exitCode = 1;
       let durationMs = 0;
