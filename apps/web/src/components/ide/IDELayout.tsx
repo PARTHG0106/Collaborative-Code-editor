@@ -15,7 +15,7 @@ import { useWorkspaceSocket } from './hooks/useWorkspaceSocket';
 import Editor from '@monaco-editor/react';
 import { io, Socket } from 'socket.io-client';
 import {
-  File, X, Terminal, Loader2
+  File, X, Terminal, Loader2, Play
 } from 'lucide-react';
 import './IDELayout.css';
 
@@ -47,6 +47,16 @@ const ensureCursorStyle = (userId: string, name: string) => {
   document.head.appendChild(style);
 };
 
+const getJudge0LanguageId = (name: string) => {
+  const ext = name.split('.').pop()?.toLowerCase();
+  const map: Record<string, number> = {
+    js: 93, jsx: 93, ts: 74, tsx: 74,
+    py: 71, c: 50, cpp: 54, java: 62,
+    cs: 51, go: 60, rs: 73, rb: 72, php: 68
+  };
+  return map[ext || ''] || null;
+};
+
 // --- Workspace Details interface ---
 interface WorkspaceDetails {
   id: string;
@@ -75,6 +85,11 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [openTabs, setOpenTabs] = useState<FileSystemItem[]>([]);
   const [editorContent, setEditorContent] = useState('');
+
+  // Execution state
+  const [terminalOpen, setTerminalOpen] = useState(false);
+  const [terminalOutput, setTerminalOutput] = useState('');
+  const [isExecuting, setIsExecuting] = useState(false);
 
   // File system hook
   const fs = useFileSystem(workspaceId);
@@ -329,6 +344,76 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     } catch { } finally { setActionLoading(false); }
   };
 
+  const handleRunCode = async () => {
+    if (!fs.activeFileId) return;
+    const file = fs.files.find(f => f.id === fs.activeFileId);
+    if (!file) return;
+
+    const langId = getJudge0LanguageId(file.name);
+    if (!langId) {
+      setTerminalOpen(true);
+      setTerminalOutput(`Execution for this file type is not supported yet.\nLanguage ID not found for extension: ${file.name.split('.').pop()}`);
+      return;
+    }
+
+    setIsExecuting(true);
+    setTerminalOpen(true);
+    setTerminalOutput('Compiling and running...');
+
+    try {
+      const baseUrl = (import.meta as any).env?.VITE_JUDGE0_API_URL || 'https://ce.judge0.com';
+      const apiKey = (import.meta as any).env?.VITE_JUDGE0_API_KEY;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) {
+        headers['X-RapidAPI-Key'] = apiKey;
+        headers['X-RapidAPI-Host'] = baseUrl.replace('https://', '').split('/')[0];
+      }
+
+      // Step 1: Create submission
+      const subRes = await fetch(`${baseUrl}/submissions?base64_encoded=false&wait=false`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          source_code: editorContent,
+          language_id: langId
+        })
+      });
+
+      if (!subRes.ok) throw new Error('Failed to create submission');
+      const { token } = await subRes.json();
+
+      // Step 2: Poll for results
+      let result = null;
+      for (let i = 0; i < 20; i++) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const checkRes = await fetch(`${baseUrl}/submissions/${token}?base64_encoded=false`, { headers });
+        if (!checkRes.ok) throw new Error('Failed to check submission');
+        const checkData = await checkRes.json();
+        
+        if (checkData.status.id >= 3) {
+          result = checkData;
+          break;
+        }
+      }
+
+      if (!result) {
+        setTerminalOutput('Execution timed out.');
+      } else {
+        const output = [
+          result.compile_output,
+          result.stdout,
+          result.stderr
+        ].filter(Boolean).join('\n');
+        
+        setTerminalOutput(output || (result.status.id === 3 ? 'Program finished successfully with no output.' : `Status: ${result.status.description}`));
+      }
+    } catch (err: any) {
+      setTerminalOutput(`Error: ${err.message || 'Execution failed.'}`);
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
   // Loading state
   if (loading) return <div className="ide-root ide-dark" style={{ alignItems: 'center', justifyContent: 'center' }}><Loader2 size={24} className="animate-spin" style={{ color: 'var(--ide-accent)' }} /></div>;
   if (!workspace) return <div className="ide-root ide-dark" style={{ alignItems: 'center', justifyContent: 'center', gap: 8 }}><span>Failed to load workspace</span><button className="ide-btn" onClick={onBack}>Back</button></div>;
@@ -405,6 +490,19 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
                 </span>
               </button>
             ))}
+            
+            {/* Run Button */}
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: '8px' }}>
+              <button 
+                className="ide-btn" 
+                style={{ height: '24px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
+                onClick={handleRunCode}
+                disabled={isExecuting || !fs.activeFileId}
+              >
+                {isExecuting ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
+                Run
+              </button>
+            </div>
           </div>
 
           {/* Editor */}
@@ -439,6 +537,19 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
               <Terminal size={40} style={{ opacity: 0.3, color: 'var(--ide-accent)' }} />
               <h3>SyncScript</h3>
               <p>Select a file from the explorer to start editing, or create a new file.</p>
+            </div>
+          )}
+
+          {/* Execution Terminal Panel */}
+          {terminalOpen && (
+            <div className="ide-terminal-panel" style={{ height: '30%', minHeight: '150px', borderTop: '1px solid var(--ide-border)', backgroundColor: 'var(--ide-bg-darker)', display: 'flex', flexDirection: 'column' }}>
+              <div className="ide-terminal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 12px', borderBottom: '1px solid var(--ide-border)', backgroundColor: 'var(--ide-bg)', fontSize: '12px', color: 'var(--ide-text-muted)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Terminal size={12} /> OUTPUT</div>
+                <button className="ide-icon-btn" onClick={() => setTerminalOpen(false)}><X size={14} /></button>
+              </div>
+              <div className="ide-terminal-body" style={{ padding: '8px 12px', flex: 1, overflowY: 'auto', fontFamily: 'var(--ide-font-mono), monospace', fontSize: '13px', whiteSpace: 'pre-wrap', color: 'var(--ide-text)' }}>
+                {terminalOutput}
+              </div>
             </div>
           )}
 
