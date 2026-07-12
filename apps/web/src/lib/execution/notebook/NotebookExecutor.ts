@@ -80,21 +80,24 @@ export class NotebookKernel {
 
     await this.runtime.execute(cell.source, {
       onStdout: (data) => {
-        // Find existing stdout and append, or create new
+        const cleanData = data.replace(/\x1b\[[0-9;]*m/g, '');
+        if (!cleanData) return;
         const last = outputs[outputs.length - 1];
         if (last && last.type === 'stdout') {
-          last.text = (last.text || '') + data;
+          last.text = (last.text || '') + cleanData;
         } else {
-          outputs.push({ type: 'stdout', text: data });
+          outputs.push({ type: 'stdout', text: cleanData });
         }
         onOutput([...outputs]);
       },
       onStderr: (data) => {
+        const cleanData = data.replace(/\x1b\[[0-9;]*m/g, '');
+        if (!cleanData) return;
         const last = outputs[outputs.length - 1];
         if (last && last.type === 'stderr') {
-          last.text = (last.text || '') + data;
+          last.text = (last.text || '') + cleanData;
         } else {
-          outputs.push({ type: 'stderr', text: data });
+          outputs.push({ type: 'stderr', text: cleanData });
         }
         onOutput([...outputs]);
       },

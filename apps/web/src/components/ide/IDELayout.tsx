@@ -312,7 +312,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     fs.setActiveFileId(file.id);
     setEditorContent(file.content || '');
     fs.setSaveStatus('saved');
-    if (!openTabs.find(t => t.id === file.id)) setOpenTabs(prev => [...prev, file]);
+    setOpenTabs(prev => prev.find(t => t.id === file.id) ? prev : [...prev, file]);
   };
 
   const closeTab = (id: string) => {
@@ -412,6 +412,14 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
 
     setIsExecuting(true);
     setTerminalOpen(true);
+    
+    // Wait for the TerminalPanel to mount and initialize the manager
+    let retries = 0;
+    while (!terminalManagerRef.current && retries < 20) {
+      await new Promise(r => setTimeout(r, 50));
+      retries++;
+    }
+    
     terminalManagerRef.current?.clear();
 
     const target = orchestratorRef.current.selectTarget(lang);
