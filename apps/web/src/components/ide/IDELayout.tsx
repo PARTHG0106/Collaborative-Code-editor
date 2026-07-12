@@ -33,6 +33,8 @@ const getLanguage = (name: string) => {
     js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
     py: 'python', html: 'html', css: 'css', json: 'json', md: 'markdown',
     sql: 'sql', sh: 'shell', yml: 'yaml', yaml: 'yaml',
+    c: 'c', cpp: 'cpp', java: 'java', go: 'go', rs: 'rust',
+    ipynb: 'jupyter'
   };
   return map[ext || ''] || 'plaintext';
 };
