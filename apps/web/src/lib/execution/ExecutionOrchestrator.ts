@@ -1,5 +1,6 @@
 import { ExecutionTarget, RuntimeCallbacks } from './types';
 import { BrowserExecutor } from './BrowserExecutor';
+import { analyzeCode } from './security';
 
 const EXT_TO_LANG: Record<string, string> = {
   js: 'javascript', jsx: 'javascript', mjs: 'javascript',
@@ -84,6 +85,20 @@ export class ExecutionOrchestrator {
     this.emitStatus(target, true);
 
     callbacks.onStdout(`\x1b[36m[${this.getTargetLabel(target)} | ${language}]\x1b[0m\r\n`);
+
+    // Run Security Analysis
+    const analysis = analyzeCode(code, language);
+    if (!analysis.safe) {
+      callbacks.onStderr(`\x1b[31m[Security Block] Execution aborted:\x1b[0m\r\n`);
+      analysis.blocked.forEach(msg => callbacks.onStderr(`- ${msg}\r\n`));
+      this.emitStatus(null, false);
+      callbacks.onExit(1);
+      return;
+    }
+    if (analysis.warnings.length > 0) {
+      callbacks.onStdout(`\x1b[33m[Warnings]:\x1b[0m\r\n`);
+      analysis.warnings.forEach(msg => callbacks.onStdout(`- ${msg}\r\n`));
+    }
 
     const wrappedCallbacks: RuntimeCallbacks = {
       ...callbacks,
