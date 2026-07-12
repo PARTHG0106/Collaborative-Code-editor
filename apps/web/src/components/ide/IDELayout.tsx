@@ -15,6 +15,7 @@ import { useWorkspaceSocket } from './hooks/useWorkspaceSocket';
 import { ExecutionOrchestrator, getLangFromFilename } from '../../lib/execution/ExecutionOrchestrator';
 import { TerminalPanel } from '../../lib/execution/terminal/TerminalPanel';
 import { TerminalManager } from '../../lib/execution/terminal/TerminalManager';
+import { AgentConnector } from '../../lib/execution/AgentConnector';
 import { ExecutionTarget } from '../../lib/execution/types';
 import Editor from '@monaco-editor/react';
 import { io, Socket } from 'socket.io-client';
@@ -86,8 +87,39 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionTarget, setExecutionTarget] = useState<ExecutionTarget | null>(null);
+  const [agentConnected, setAgentConnected] = useState(false);
   const orchestratorRef = useRef(new ExecutionOrchestrator());
   const terminalManagerRef = useRef<TerminalManager | null>(null);
+  const agentRef = useRef(new AgentConnector());
+
+  // Auto-detect local agent on mount
+  useEffect(() => {
+    const agent = agentRef.current;
+    agent.onStatus((connected, runtimes) => {
+      setAgentConnected(connected);
+      orchestratorRef.current.setAgentStatus(connected, runtimes);
+      if (connected) {
+        orchestratorRef.current.setAgentInputHandler((text) => agent.sendInput(text));
+      }
+    });
+
+    // Try connecting
+    agent.connect().then((ok) => {
+      if (ok) console.log('🔌 Local agent connected');
+    });
+
+    // Retry every 10s
+    const interval = setInterval(() => {
+      if (!agent.isConnected()) {
+        agent.connect();
+      }
+    }, 10000);
+
+    return () => {
+      clearInterval(interval);
+      agent.disconnect();
+    };
+  }, []);
 
   // File system hook
   const fs = useFileSystem(workspaceId);
@@ -381,7 +413,11 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
             `\r\n${color}[Process exited with code ${code}]\x1b[0m\r\n`
           );
         },
-      }
+      },
+      // Agent executor
+      agentRef.current.isConnected()
+        ? (lang, code, cb) => agentRef.current.execute(lang, code, cb)
+        : undefined,
     );
   };
 
@@ -545,6 +581,10 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
               {activeFile && <span className="ide-statusbar-item">Ln {editorContent.split('\n').length}</span>}
             </div>
             <div className="ide-statusbar-right">
+              <span className="ide-statusbar-item" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: agentConnected ? 'var(--ide-success)' : 'var(--ide-text-muted)', display: 'inline-block' }} />
+                {agentConnected ? 'Agent' : 'No Agent'}
+              </span>
               <span className="ide-statusbar-item">{fs.saveStatus === 'saved' ? '✓ Saved' : fs.saveStatus === 'saving' ? 'Saving...' : '● Unsaved'}</span>
             </div>
           </div>

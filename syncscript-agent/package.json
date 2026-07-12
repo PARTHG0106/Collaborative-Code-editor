@@ -1,0 +1,24 @@
+{
+  "name": "syncscript-agent",
+  "version": "1.0.0",
+  "description": "SyncScript Local Execution Agent — Run code on your machine from the browser IDE",
+  "bin": {
+    "syncscript-agent": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "npx tsx src/index.ts"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "chalk": "^5.4.0",
+    "commander": "^13.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/ws": "^8.5.0",
+    "@types/node": "^20.0.0"
+  },
+  "type": "module"
+}

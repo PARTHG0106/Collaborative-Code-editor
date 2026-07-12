@@ -3,6 +3,7 @@ import { Server as HTTPServer } from 'http';
 import jwt from 'jsonwebtoken';
 import { config } from './config/index.js';
 import prisma from './lib/prisma.js';
+import { registerExecutionHandlers } from './execution/executionSocket.js';
 
 interface UserPayload {
   id: string;
@@ -84,6 +85,8 @@ export function initSocketServer(httpServer: HTTPServer): SocketIOServer {
     const currentUser = socket.data.user as UserPayload;
     console.info(`⚡ User connected to socket: ${currentUser.name} (${currentUser.email})`);
 
+    // Register execution handlers
+    registerExecutionHandlers(io, socket);
     // ----------------------------------------------------
     // WORKSPACE PRESENCE HANDLERS
     // ----------------------------------------------------

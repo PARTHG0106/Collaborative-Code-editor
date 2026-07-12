@@ -129,3 +129,84 @@ model FileVersion {
 
   @@map("file_versions")
 }
+
+// ===== Execution System Models =====
+
+enum ExecutionStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+  TIMEOUT
+  CANCELLED
+}
+
+enum ExecutionTarget {
+  BROWSER
+  LOCAL_AGENT
+  REMOTE
+}
+
+model ExecutionSession {
+  id          String          @id @default(cuid())
+  workspaceId String          @map("workspace_id")
+  fileId      String?         @map("file_id")
+  userId      String          @map("user_id")
+  language    String
+  target      ExecutionTarget
+  status      ExecutionStatus @default(QUEUED)
+  code        String
+  stdin       String?
+  stdout      String?
+  stderr      String?
+  exitCode    Int?            @map("exit_code")
+  startedAt   DateTime?       @map("started_at")
+  completedAt DateTime?       @map("completed_at")
+  durationMs  Int?            @map("duration_ms")
+  createdAt   DateTime        @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@index([userId])
+  @@map("execution_sessions")
+}
+
+model ExecutionAgent {
+  id          String   @id @default(cuid())
+  userId      String   @unique @map("user_id")
+  name        String   @default("My Machine")
+  lastSeen    DateTime @default(now()) @map("last_seen")
+  isOnline    Boolean  @default(false) @map("is_online")
+  runtimes    String[] // ["python", "node", "gcc", "javac", "go"]
+  platform    String?  // "win32", "darwin", "linux"
+  version     String?  // agent version
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("execution_agents")
+}
+
+model NotebookSession {
+  id          String   @id @default(cuid())
+  workspaceId String   @map("workspace_id")
+  fileId      String   @map("file_id")
+  userId      String   @map("user_id")
+  kernelState String?  @map("kernel_state")
+  outputs     Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, fileId])
+  @@map("notebook_sessions")
+}
+
+model TerminalSession {
+  id          String          @id @default(cuid())
+  workspaceId String          @map("workspace_id")
+  userId      String          @map("user_id")
+  target      ExecutionTarget
+  isActive    Boolean         @default(true) @map("is_active")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  closedAt    DateTime?       @map("closed_at")
+
+  @@index([workspaceId])
+  @@map("terminal_sessions")
+}
