@@ -11,9 +11,9 @@ import { io, Socket } from 'socket.io-client';
 
 const getRandomColorForUser = (userId: string): string => {
   const colors = [
-    '#f43f5e', '#ec4899', '#d946ef', '#a855f7', '#8b5cf6', 
-    '#6366f1', '#3b82f6', '#0ea5e9', '#06b6d4', '#14b8a6', 
-    '#10b981', '#22c55e', '#84cc16', '#eab308', '#f97316'
+    '#4f5d4e', '#70806e', '#8f9e8b', '#a99f8c', '#c0b299', 
+    '#8c7b68', '#5d4f43', '#5d6b70', '#7f8e94', '#5c6454', 
+    '#58705c', '#6e8572', '#9ba68d', '#c08a3e', '#b04c4c'
   ];
   let hash = 0;
   for (let i = 0; i < userId.length; i++) {
@@ -567,7 +567,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
   if (loading) {
     return (
       <div className="workspace-loading glass-card">
-        <Loader2 className="animate-spin text-purple-500" size={32} />
+        <Loader2 className="animate-spin text-[var(--accent-primary)]" size={32} />
         <p>Loading workspace environments...</p>
       </div>
     );
@@ -823,8 +823,8 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
 
   const getRoleIcon = (role: 'OWNER' | 'EDITOR' | 'VIEWER') => {
     switch (role) {
-      case 'OWNER': return <ShieldCheck className="text-purple-400" size={16} />;
-      case 'EDITOR': return <Shield className="text-blue-400" size={16} />;
+      case 'OWNER': return <ShieldCheck className="text-[var(--accent-secondary)]" size={16} />;
+      case 'EDITOR': return <Shield className="text-[var(--accent-secondary)]" size={16} />;
       case 'VIEWER': return <ShieldAlert className="text-gray-400" size={16} />;
     }
   };
@@ -859,7 +859,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                   <Folder size={14} className="text-yellow-500 fill-yellow-500/20" />
                 </>
               ) : (
-                <File size={14} className="text-purple-400" />
+                <File size={14} className="text-[var(--accent-secondary)]" />
               )}
               
               {isRenaming ? (
@@ -954,7 +954,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
           {/* Inline creation input inside this folder */}
           {isFolder && isExpanded && newItemType !== null && newItemParentId === item.id && (
             <div className="tree-inline-input-wrapper" style={{ paddingLeft: `${(depth + 1) * 16 + 12}px` }}>
-              {newItemType === 'FILE' ? <File size={14} className="text-purple-400" /> : <Folder size={14} className="text-purple-400" />}
+              {newItemType === 'FILE' ? <File size={14} className="text-[var(--accent-secondary)]" /> : <Folder size={14} className="text-[var(--accent-secondary)]" />}
               <input 
                 type="text"
                 placeholder={newItemType === 'FILE' ? "file.txt" : "folder_name"}
@@ -1162,7 +1162,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
             <div className="file-tree-container">
               {filesLoading ? (
                 <div className="loading-spinner">
-                  <Loader2 className="animate-spin text-purple-500" size={20} />
+                  <Loader2 className="animate-spin text-[var(--accent-primary)]" size={20} />
                   <span className="text-xs">Loading tree...</span>
                 </div>
               ) : (
@@ -1170,7 +1170,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                   {/* Inline creation at root level */}
                   {newItemType !== null && newItemParentId === null && (
                     <div className="tree-inline-input-wrapper">
-                      {newItemType === 'FILE' ? <File size={14} className="text-purple-400" /> : <Folder size={14} className="text-purple-400" />}
+                      {newItemType === 'FILE' ? <File size={14} className="text-[var(--accent-secondary)]" /> : <Folder size={14} className="text-[var(--accent-secondary)]" />}
                       <input 
                         type="text"
                         placeholder={newItemType === 'FILE' ? "file.txt" : "folder_name"}
@@ -1225,7 +1225,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                       <AlignLeft size={16} />
                     </button>
                     <div className="editor-active-tab">
-                      <File size={14} className="text-purple-400" />
+                      <File size={14} className="text-[var(--accent-secondary)]" />
                       <span>{activeFile?.name}</span>
                       <span className="text-xs text-gray-500 ml-2">({editorLanguage})</span>
                     </div>
@@ -1233,7 +1233,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                   
                   <div className="editor-header-actions">
                     <button 
-                      className={`explorer-action-btn ${wordWrap === 'on' ? 'text-purple-400' : ''}`}
+                      className={`explorer-action-btn ${wordWrap === 'on' ? 'text-[var(--accent-secondary)]' : ''}`}
                       title="Toggle Word Wrap"
                       onClick={() => setWordWrap(prev => prev === 'on' ? 'off' : 'on')}
                     >
@@ -1241,7 +1241,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                     </button>
                     
                     <button 
-                      className={`explorer-action-btn ${minimap ? 'text-purple-400' : ''}`}
+                      className={`explorer-action-btn ${minimap ? 'text-[var(--accent-secondary)]' : ''}`}
                       title="Toggle Minimap"
                       onClick={() => setMinimap(prev => !prev)}
                     >
@@ -1259,7 +1259,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                     <div className="h-4 w-[1px] bg-white/10 mx-1"></div>
 
                     <button 
-                      className={`explorer-action-btn relative ${rightSidebarTab === 'chat' ? 'text-purple-400' : ''}`}
+                      className={`explorer-action-btn relative ${rightSidebarTab === 'chat' ? 'text-[var(--accent-secondary)]' : ''}`}
                       title="Workspace Chat"
                       onClick={() => setRightSidebarTab(prev => prev === 'chat' ? null : 'chat')}
                     >
@@ -1270,7 +1270,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                     </button>
 
                     <button 
-                      className={`explorer-action-btn ${rightSidebarTab === 'versions' ? 'text-purple-400' : ''}`}
+                      className={`explorer-action-btn ${rightSidebarTab === 'versions' ? 'text-[var(--accent-secondary)]' : ''}`}
                       title="Version History"
                       onClick={() => setRightSidebarTab(prev => prev === 'versions' ? null : 'versions')}
                     >
@@ -1319,7 +1319,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                     }}
                     loading={
                       <div className="flex flex-col items-center justify-center h-full w-full gap-2 text-gray-500">
-                        <Loader2 className="animate-spin text-purple-500" size={24} />
+                        <Loader2 className="animate-spin text-[var(--accent-primary)]" size={24} />
                         <span className="text-xs">Initializing Monaco Engine...</span>
                       </div>
                     }
@@ -1332,7 +1332,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
               </>
             ) : (
               <div className="editor-welcome-screen">
-                <Terminal size={48} className="text-purple-500 opacity-60 mb-2" />
+                <Terminal size={48} className="text-[var(--accent-primary)] opacity-60 mb-2" />
                 <h3>No File Opened</h3>
                 <p>Select an existing file from the explorer sidebar or create a new one to start collaborating.</p>
                 <button 
@@ -1421,7 +1421,7 @@ export const WorkspaceDetail: React.FC<WorkspaceDetailProps> = ({
                     <div className="versions-list">
                       {fileVersionsLoading ? (
                         <div className="p-4 text-center">
-                          <Loader2 className="animate-spin text-purple-500 mx-auto" size={18} />
+                          <Loader2 className="animate-spin text-[var(--accent-primary)] mx-auto" size={18} />
                           <span className="text-xs text-gray-500 mt-1 block">Loading snapshots...</span>
                         </div>
                       ) : fileVersions.length === 0 ? (

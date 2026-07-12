@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { WorkspaceDetail } from '../components/WorkspaceDetail';
+import { useNavigate } from 'react-router-dom';
 import { 
   LogOut, User, FolderGit2, Mail, KeyRound, Sparkles, 
   Plus, Users, ArrowRight, ShieldCheck, Shield, ShieldAlert,
@@ -20,13 +20,13 @@ interface Workspace {
 
 export const Dashboard: React.FC = () => {
   const { user, logout, apiClient } = useAuth();
+  const navigate = useNavigate();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
 
   // Workspaces state
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loadingWorkspaces, setLoadingWorkspaces] = useState(true);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
 
   // Workspace creation modal state
@@ -94,8 +94,8 @@ export const Dashboard: React.FC = () => {
         setIsCreateModalOpen(false);
         setNewWorkspaceName('');
         setNewWorkspaceDesc('');
-        // Instantly focus the newly created workspace
-        setActiveWorkspaceId(res.data.data.id);
+        // Navigate to the new workspace IDE
+        navigate(`/workspace/${res.data.data.id}`);
       }
     } catch (err: any) {
       setDashboardError(err.response?.data?.error?.message || 'Failed to create workspace');
@@ -106,8 +106,8 @@ export const Dashboard: React.FC = () => {
 
   const getRoleIcon = (role: 'OWNER' | 'EDITOR' | 'VIEWER') => {
     switch (role) {
-      case 'OWNER': return <ShieldCheck className="text-purple-400" size={14} />;
-      case 'EDITOR': return <Shield className="text-blue-400" size={14} />;
+      case 'OWNER': return <ShieldCheck className="text-[var(--accent-primary)]" size={14} />;
+      case 'EDITOR': return <Shield className="text-[var(--accent-secondary)]" size={14} />;
       case 'VIEWER': return <ShieldAlert className="text-gray-400" size={14} />;
     }
   };
@@ -120,7 +120,7 @@ export const Dashboard: React.FC = () => {
       <div
         className="fixed inset-0 pointer-events-none z-0"
         style={{
-          background: `radial-gradient(800px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(99, 102, 241, 0.05), transparent 40%)`,
+          background: `radial-gradient(800px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(var(--accent-primary-rgb), 0.05), transparent 40%)`,
         }}
       />
 
@@ -156,22 +156,8 @@ export const Dashboard: React.FC = () => {
         )}
 
 
-        {activeWorkspaceId ? (
-          /* Render Workspace Details View */
-          <WorkspaceDetail 
-            workspaceId={activeWorkspaceId} 
-            onBack={() => {
-              setActiveWorkspaceId(null);
-              fetchWorkspaces();
-            }}
-            onWorkspaceDeleted={() => {
-              setActiveWorkspaceId(null);
-              fetchWorkspaces();
-            }}
-          />
-        ) : (
-          /* Render General Dashboard and Grid View */
-          <>
+        {/* Dashboard Grid View */}
+        <>
             <section className="welcome-banner glass-card">
               <div className="banner-content">
                 <h1 className="banner-title">
@@ -205,7 +191,7 @@ export const Dashboard: React.FC = () => {
 
                 {loadingWorkspaces ? (
                   <div className="workspaces-loading-state">
-                    <Loader2 className="animate-spin text-purple-500" size={24} />
+                    <Loader2 className="animate-spin text-[var(--accent-primary)]" size={24} />
                     <p>Loading workspaces...</p>
                   </div>
                 ) : workspaces.length === 0 ? (
@@ -224,7 +210,7 @@ export const Dashboard: React.FC = () => {
                       <div 
                         key={ws.id} 
                         className="workspace-item-card"
-                        onClick={() => setActiveWorkspaceId(ws.id)}
+                        onClick={() => navigate(`/workspace/${ws.id}`)}
                       >
                         <div className="card-meta">
                           <span className="role-badge">
@@ -279,7 +265,6 @@ export const Dashboard: React.FC = () => {
               </section>
             </div>
           </>
-        )}
       </main>
 
       {/* Create Workspace Modal */}

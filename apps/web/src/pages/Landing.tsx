@@ -143,16 +143,16 @@ export const Landing: React.FC = () => {
       <div
         className="fixed inset-0 pointer-events-none z-0"
         style={{
-          background: `radial-gradient(600px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(99, 102, 241, 0.08), transparent 40%)`,
+          background: `radial-gradient(600px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(var(--accent-primary-rgb), 0.08), transparent 40%)`,
         }}
       />
 
       <div className="relative z-10">
         {/* Sticky Glassmorphic Header Navigation */}
-        <header className="flex justify-between items-center px-4 sm:px-8 py-4 sm:py-5 border-b border-white/5 backdrop-blur-md bg-[#0a0b10]/60 sticky top-0 z-50">
+        <header className="flex justify-between items-center px-4 sm:px-8 py-4 sm:py-5 border-b border-[var(--border)] backdrop-blur-md bg-[var(--bg-glass)] sticky top-0 z-50">
           <div className="flex items-center gap-2">
-            <div className="text-xl font-bold bg-gradient-to-r from-primary to-[#a855f7] bg-clip-text text-transparent brand-logo">&lt;/&gt;</div>
-            <span className="text-lg sm:text-xl font-bold text-white brand-name">SyncScript</span>
+            <div className="text-xl font-bold bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)] bg-clip-text text-transparent brand-logo">&lt;/&gt;</div>
+            <span className="text-lg sm:text-xl font-bold text-[var(--text-primary)] brand-name">SyncScript</span>
           </div>
           <nav className="flex gap-3 sm:gap-4 items-center header-nav">
             {user ? (
@@ -163,7 +163,7 @@ export const Landing: React.FC = () => {
               </Link>
             ) : (
               <>
-                <Link to="/login" className="text-xs sm:text-sm font-medium text-gray-400 hover:text-white transition-colors">
+                <Link to="/login" className="text-xs sm:text-sm font-medium text-gray-400 hover:text-[var(--text-primary)] transition-colors">
                   Sign In
                 </Link>
                 <Link to="/register">
@@ -183,7 +183,7 @@ export const Landing: React.FC = () => {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.6 }}
               >
-                <Badge variant="outline" className="mb-6 px-4 py-2 text-xs sm:text-sm backdrop-blur-sm bg-background/50 border-primary/30 text-white">
+                <Badge variant="outline" className="mb-6 px-4 py-2 text-xs sm:text-sm backdrop-blur-sm bg-[var(--bg-secondary)]/50 border-[var(--accent-primary)]/30 text-[var(--text-primary)]">
                   <Activity className="w-4 h-4 mr-2 inline-block text-green-500 animate-pulse" />
                   All Systems Operational
                 </Badge>
@@ -211,7 +211,7 @@ export const Landing: React.FC = () => {
                               stiffness: 150,
                               damping: 25,
                             }}
-                            className="inline-block text-transparent bg-clip-text bg-gradient-to-r from-white to-gray-300"
+                            className="inline-block text-[var(--text-primary)]"
                           >
                             {char}
                           </motion.span>
@@ -279,7 +279,7 @@ export const Landing: React.FC = () => {
                       </Button>
                     </Link>
                     <Link to="/login">
-                      <Button size="lg" variant="outline" className="text-lg px-8 py-6 rounded-full backdrop-blur-sm bg-background/50 text-white border-white/10 hover:bg-white/5">
+                      <Button size="lg" variant="outline" className="text-lg px-8 py-6 rounded-full backdrop-blur-sm bg-[var(--bg-secondary)] text-[var(--text-primary)] border-[var(--border)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors">
                         Sign In
                       </Button>
                     </Link>
@@ -298,7 +298,7 @@ export const Landing: React.FC = () => {
                   <CardContent className="flex flex-wrap items-center gap-6 p-6">
                     <div className="flex items-center gap-2">
                       <div className="w-2.5 h-2.5 rounded-full bg-green-500 animate-pulse" />
-                      <span className="text-sm font-semibold text-white">Monorepo System Status</span>
+                      <span className="text-sm font-semibold text-[var(--text-primary)]">Monorepo System Status</span>
                     </div>
                     <div className="h-6 w-px bg-border hidden sm:block" />
 
@@ -316,15 +316,15 @@ export const Landing: React.FC = () => {
                       <div className="flex flex-wrap items-center gap-5 text-sm text-gray-300">
                         <div className="flex items-center gap-1.5">
                           <CheckCircle2 className="w-4 h-4 text-green-500" />
-                          <span>Status: <span className="text-white font-medium">healthy</span></span>
+                          <span>Status: <span className="text-[var(--text-primary)] font-medium">healthy</span></span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <CheckCircle2 className="w-4 h-4 text-green-500" />
-                          <span>DB: <span className="text-white font-medium">{health?.services.database.status} ({health?.services.database.latency})</span></span>
+                          <span>DB: <span className="text-[var(--text-primary)] font-medium">{health?.services.database.status} ({health?.services.database.latency})</span></span>
                         </div>
                         <div className="flex items-center gap-1.5">
                           <CheckCircle2 className="w-4 h-4 text-green-500" />
-                          <span>Env: <span className="text-white font-medium">{health?.environment}</span></span>
+                          <span>Env: <span className="text-[var(--text-primary)] font-medium">{health?.environment}</span></span>
                         </div>
                       </div>
                     )}
@@ -333,7 +333,7 @@ export const Landing: React.FC = () => {
                     <Button 
                       variant="ghost" 
                       size="sm" 
-                      className="h-8 px-3 text-xs text-muted-foreground hover:text-white rounded-md bg-white/5 border border-white/5 hover:bg-white/10 transition-all"
+                      className="h-8 px-3 text-xs text-muted-foreground hover:text-[var(--text-primary)] rounded-md bg-[var(--bg-secondary)] border border-[var(--border)] hover:bg-[var(--bg-tertiary)] transition-all"
                       onClick={fetchHealth}
                     >
                       Refresh Health
@@ -355,9 +355,9 @@ export const Landing: React.FC = () => {
               viewport={{ once: true }}
               transition={{ duration: 0.6 }}
             >
-              <h2 className="text-4xl md:text-5xl font-bold mb-4 text-white">
+              <h2 className="text-4xl md:text-5xl font-bold mb-4 text-[var(--text-primary)]">
                 Everything You Need to
-                <span className="block bg-gradient-to-r from-primary to-[#a855f7] bg-clip-text text-transparent">
+                <span className="block bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)] bg-clip-text text-transparent">
                   Code Together
                 </span>
               </h2>
@@ -388,7 +388,7 @@ export const Landing: React.FC = () => {
                 <div className="absolute inset-0 bg-grid-white/5 pointer-events-none" />
                 <CardContent className="p-12 text-center relative z-10">
                   <GitBranch className="w-16 h-16 mx-auto mb-6 text-primary" />
-                  <h2 className="text-4xl md:text-5xl font-bold mb-6 text-white">
+                  <h2 className="text-4xl md:text-5xl font-bold mb-6 text-[var(--text-primary)]">
                     Ready to Transform Your Workflow?
                   </h2>
                   <p className="text-xl text-muted-foreground mb-8 max-w-2xl mx-auto">
@@ -426,7 +426,7 @@ export const Landing: React.FC = () => {
             <div className="flex flex-col md:flex-row justify-between items-center gap-4">
               <div className="flex items-center gap-2">
                 <Code2 className="w-6 h-6 text-primary" />
-                <span className="text-xl font-bold text-white">SyncScript Platform</span>
+                <span className="text-xl font-bold text-[var(--text-primary)]">SyncScript Platform</span>
               </div>
               <p className="text-sm text-muted-foreground">
                 &copy; {new Date().getFullYear()} SyncScript. Made for developers, by developers.

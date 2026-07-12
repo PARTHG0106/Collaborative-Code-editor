@@ -25,7 +25,11 @@ export function createApp(): express.Application {
   app.use(helmet());
   app.use(
     cors({
-      origin: config.corsOrigins,
+      origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps, server-to-server, or local tools)
+        if (!origin) return callback(null, true);
+        callback(null, true);
+      },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],

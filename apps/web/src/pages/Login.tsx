@@ -79,18 +79,18 @@ export const Login: React.FC = () => {
       <div
         className="fixed inset-0 pointer-events-none z-0"
         style={{
-          background: `radial-gradient(600px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(99, 102, 241, 0.08), transparent 40%)`,
+          background: `radial-gradient(600px circle at ${mousePosition.x}px ${mousePosition.y}px, rgba(var(--accent-primary-rgb), 0.08), transparent 40%)`,
         }}
       />
 
-      <div className="auth-card glass-card relative z-10 max-w-[440px] w-full p-6 sm:p-10 bg-background/50 backdrop-blur-lg border border-border/50 shadow-glow rounded-2xl flex flex-col gap-6">
+      <div className="auth-card glass-card relative z-10 max-w-[440px] w-full p-6 sm:p-10 bg-background/50 backdrop-blur-lg border border-[var(--border)] shadow-glow rounded-2xl flex flex-col gap-6">
         <div className="auth-header-content text-center flex flex-col items-center gap-3">
           <div className="auth-brand inline-flex items-center gap-2">
-            <div className="text-xl font-bold bg-gradient-to-r from-primary to-[#a855f7] bg-clip-text text-transparent brand-logo">&lt;/&gt;</div>
-            <span className="text-xl font-bold text-white brand-name font-sans">SyncScript</span>
+            <div className="text-xl font-bold bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)] bg-clip-text text-transparent brand-logo">&lt;/&gt;</div>
+            <span className="text-xl font-bold text-[var(--text-primary)] brand-name font-sans">SyncScript</span>
           </div>
-          <h2 className="text-3xl font-extrabold tracking-tight text-white mt-2">Welcome Back</h2>
-          <p className="text-sm text-gray-400">Sign in to resume collaborating on code</p>
+          <h2 className="text-3xl font-extrabold tracking-tight text-[var(--text-primary)] mt-2">Welcome Back</h2>
+          <p className="text-sm text-[var(--text-secondary)]">Sign in to resume collaborating on code</p>
         </div>
 
         <form onSubmit={handleSubmit} className="auth-form flex flex-col gap-4">
@@ -102,7 +102,7 @@ export const Login: React.FC = () => {
           )}
 
           <div className="input-group flex flex-col gap-2">
-            <label htmlFor="email" className="text-xs font-semibold text-gray-400 tracking-wider">Email Address</label>
+            <label htmlFor="email" className="text-xs font-semibold text-[var(--text-secondary)] tracking-wider">Email Address</label>
             <div className="input-wrapper relative flex items-center">
               <Mail className="input-icon absolute left-3.5 text-gray-500 pointer-events-none" size={18} />
               <input
@@ -112,14 +112,14 @@ export const Login: React.FC = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isSubmitting}
-                className="w-full pl-11 pr-4 py-3 bg-[#12131a]/40 border border-border/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:bg-[#12131a]/60 transition-all duration-200"
+                className="w-full pl-11 pr-4 py-3 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:bg-white transition-all duration-200"
                 required
               />
             </div>
           </div>
 
           <div className="input-group flex flex-col gap-2">
-            <label htmlFor="password" className="text-xs font-semibold text-gray-400 tracking-wider">Password</label>
+            <label htmlFor="password" className="text-xs font-semibold text-[var(--text-secondary)] tracking-wider">Password</label>
             <div className="input-wrapper relative flex items-center">
               <Lock className="input-icon absolute left-3.5 text-gray-500 pointer-events-none" size={18} />
               <input
@@ -129,7 +129,7 @@ export const Login: React.FC = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={isSubmitting}
-                className="w-full pl-11 pr-4 py-3 bg-[#12131a]/40 border border-border/50 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:bg-[#12131a]/60 transition-all duration-200"
+                className="w-full pl-11 pr-4 py-3 bg-[var(--bg-secondary)] border border-[var(--border)] rounded-lg text-[var(--text-primary)] placeholder-gray-500 focus:outline-none focus:border-primary/50 focus:bg-white transition-all duration-200"
                 required
               />
             </div>
@@ -148,7 +148,7 @@ export const Login: React.FC = () => {
           </Button>
         </form>
 
-        <div className="auth-footer text-center mt-2 text-sm text-gray-400">
+        <div className="auth-footer text-center mt-2 text-sm text-[var(--text-secondary)]">
           <p>
             {"Don't have an account? "}{' '}
             <Link to="/register" className="text-primary hover:text-primary/80 font-semibold transition-colors">

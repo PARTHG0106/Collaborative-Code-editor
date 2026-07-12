@@ -31,22 +31,24 @@
 
 :root {
   /* Colors */
-  --bg-primary: #0a0b10;
-  --bg-secondary: #12131a;
-  --bg-tertiary: #1a1c26;
-  --bg-glass: rgba(18, 19, 26, 0.7);
-  --border-glass: rgba(255, 255, 255, 0.08);
+  --bg-primary: #f5f5f3;      /* Light warm stone off-white */
+  --bg-secondary: #ffffff;    /* Pure white for cards/sections */
+  --bg-tertiary: #eaeae7;     /* Soft warm gray for borders, sidebars, active items */
+  --bg-glass: rgba(255, 255, 255, 0.7);
+  --border-glass: rgba(0, 0, 0, 0.08);
 
-  --text-primary: #f3f4f6;
-  --text-secondary: #9ca3af;
-  --text-muted: #6b7280;
+  --text-primary: #1e201c;    /* Deep earthy charcoal for high-contrast text */
+  --text-secondary: #585d56;  /* Muted olive-charcoal */
+  --text-muted: #868b82;      /* Earthy gray */
 
-  --accent-primary: #6366f1; /* Indigo */
-  --accent-secondary: #a855f7; /* Purple */
-  --accent-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
-  --accent-success: #10b981;
-  --accent-warning: #f59e0b;
-  --accent-danger: #ef4444;
+  --accent-primary: #4f5d4e;  /* Sage/olive green */
+  --accent-secondary: #70806e; /* Lighter olive green */
+  --accent-primary-rgb: 79, 93, 78;
+  --accent-secondary-rgb: 112, 128, 110;
+  --accent-gradient: linear-gradient(135deg, #4f5d4e 0%, #70806e 100%);
+  --accent-success: #58705c;
+  --accent-warning: #c08a3e;
+  --accent-danger: #b04c4c;
 
   /* Typography */
   --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -57,28 +59,28 @@
   --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 
   /* Shadows */
-  --shadow-glow: 0 0 25px rgba(99, 102, 241, 0.15);
+  --shadow-glow: 0 4px 20px rgba(79, 93, 78, 0.08);
 
-  /* Component UI Variables mapped to dark themes */
+  /* Component UI Variables mapped to light theme */
   --radius: 0.625rem;
-  --background: #0a0b10;
-  --foreground: #f3f4f6;
-  --card: #12131a;
-  --card-foreground: #f3f4f6;
-  --popover: #12131a;
-  --popover-foreground: #f3f4f6;
-  --primary: #6366f1;
+  --background: #f5f5f3;
+  --foreground: #1e201c;
+  --card: #ffffff;
+  --card-foreground: #1e201c;
+  --popover: #ffffff;
+  --popover-foreground: #1e201c;
+  --primary: #4f5d4e;
   --primary-foreground: #ffffff;
-  --secondary: #1a1c26;
-  --secondary-foreground: #ffffff;
-  --muted: #1a1c26;
-  --muted-foreground: #9ca3af;
-  --accent: #1a1c26;
-  --accent-foreground: #ffffff;
-  --destructive: #ef4444;
-  --border: rgba(255, 255, 255, 0.08);
-  --input: rgba(255, 255, 255, 0.08);
-  --ring: #6366f1;
+  --secondary: #eaeae7;
+  --secondary-foreground: #1e201c;
+  --muted: #eaeae7;
+  --muted-foreground: #585d56;
+  --accent: #eaeae7;
+  --accent-foreground: #1e201c;
+  --destructive: #b04c4c;
+  --border: rgba(0, 0, 0, 0.08);
+  --input: rgba(0, 0, 0, 0.08);
+  --ring: #4f5d4e;
 }
 
 /* Tailwind base styles layer adjustments */

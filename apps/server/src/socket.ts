@@ -68,8 +68,12 @@ export function initSocketServer(httpServer: HTTPServer): SocketIOServer {
     }
 
     try {
-      const decoded = jwt.verify(token, config.jwt.accessSecret) as UserPayload;
-      socket.data.user = decoded;
+      const decoded = jwt.verify(token, config.jwt.accessSecret) as any;
+      socket.data.user = {
+        id: decoded.userId,
+        name: decoded.name,
+        email: decoded.email
+      };
       next();
     } catch {
       next(new Error('Authentication error: Invalid token'));

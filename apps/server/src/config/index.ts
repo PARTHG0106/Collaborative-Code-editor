@@ -30,7 +30,7 @@ export const config = {
   databaseSsl: (process.env.DATABASE_URL || '').includes('sslmode='),
 
   /** CORS allowed origins */
-  corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:5173'],
+  corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:5173', 'http://localhost:5174'],
 
   /** Is production? */
   isProduction: process.env.NODE_ENV === 'production',

@@ -1,0 +1,23 @@
+{
+  "auth": null,
+  "project": {
+    "rememberedByWorkspace": {},
+    "lastResolved": null,
+    "repositoryConnectionsByProject": {}
+  },
+  "branch": {
+    "active": "preview"
+  },
+  "app": {
+    "selectedByProject": {
+      "proj_cmqkutgt60drk03l7a1dxxbzb": {
+        "id": "cps_cmqkuunye065bvkfbpnbqo2r1",
+        "name": "@collab/server"
+      }
+    },
+    "knownLiveDeploymentByProject": {}
+  },
+  "agent": {
+    "setupPromptDismissedAt": null
+  }
+}
