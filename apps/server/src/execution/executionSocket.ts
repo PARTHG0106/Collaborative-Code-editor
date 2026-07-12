@@ -51,28 +51,63 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
         data: { status: 'RUNNING', startedAt: new Date() },
       });
 
-      // NOTE: In a production system, this is where you would
-      // dispatch to a remote Docker worker via a job queue.
-      // For now, we send back a "not available" message.
-      io.to(`exec:${session.id}`).emit('execution:stderr', {
-        sessionId: session.id,
-        data: 'Remote execution workers are not configured.\nUse browser execution or install the SyncScript local agent.\n',
-        timestamp: Date.now(),
+      // Map standard languages to Piston API parameters
+      const pistonLangMap: Record<string, string> = {
+        c: 'c', cpp: 'cpp', java: 'java', python: 'python',
+        javascript: 'javascript', typescript: 'typescript',
+        go: 'go', rust: 'rust', php: 'php', ruby: 'ruby'
+      };
+
+      const pistonLang = pistonLangMap[language];
+
+      if (!pistonLang) {
+        throw new Error(`Remote execution not supported for language: ${language}`);
+      }
+
+      // Execute on Piston Public API
+      const response = await fetch('https://emkc.org/api/v2/piston/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          language: pistonLang,
+          version: '*', // Use latest available version
+          files: [{ content: code }]
+        })
       });
+
+      const result = await response.json();
+
+      let exitCode = 1;
+      let durationMs = 0;
+
+      if (result.compile && result.compile.stderr) {
+        io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: result.compile.stderr + '\n', timestamp: Date.now() });
+      }
+
+      if (result.run) {
+        if (result.run.stdout) {
+          io.to(`exec:${session.id}`).emit('execution:stdout', { sessionId: session.id, data: result.run.stdout + (result.run.stdout.endsWith('\n') ? '' : '\n'), timestamp: Date.now() });
+        }
+        if (result.run.stderr) {
+          io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: result.run.stderr + (result.run.stderr.endsWith('\n') ? '' : '\n'), timestamp: Date.now() });
+        }
+        exitCode = result.run.code || 0;
+      } else if (result.message) {
+        io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: result.message + '\n', timestamp: Date.now() });
+      }
 
       await prisma.executionSession.update({
         where: { id: session.id },
         data: {
-          status: 'FAILED',
-          stderr: 'No remote workers available',
+          status: exitCode === 0 ? 'COMPLETED' : 'FAILED',
           completedAt: new Date(),
         },
       });
 
       io.to(`exec:${session.id}`).emit('execution:completed', {
         sessionId: session.id,
-        exitCode: 1,
-        durationMs: 0,
+        exitCode,
+        durationMs,
         target: 'remote',
       });
     } catch (err) {
