@@ -146,10 +146,22 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
         durationMs: 0,
         target: 'remote',
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Execution start error:', err);
       socket.emit('execution:failed', {
-        error: 'Failed to create execution session',
+        error: err.message || 'Failed to create execution session',
+      });
+      // Try to let the UI know if it was hanging
+      socket.emit('execution:stderr', {
+        sessionId: 'unknown',
+        data: `Backend execution error: ${err.message}\r\n`,
+        timestamp: Date.now()
+      });
+      socket.emit('execution:completed', {
+        sessionId: 'unknown',
+        exitCode: 1,
+        durationMs: 0,
+        target: 'remote'
       });
     }
   });
