@@ -81,7 +81,7 @@ export class NotebookKernel {
     await this.runtime.execute(cell.source, {
       onStdout: (data) => {
         const cleanData = data.replace(/\x1b\[[0-9;]*m/g, '');
-        if (!cleanData) return;
+        if (!cleanData || cleanData.includes('[Python ready]') || cleanData.includes('Loading Python') || cleanData.includes('Initializing Python')) return;
         const last = outputs[outputs.length - 1];
         if (last && last.type === 'stdout') {
           last.text = (last.text || '') + cleanData;
