@@ -449,6 +449,31 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
       agentRef.current.isConnected()
         ? (lang, code, cb) => agentRef.current.execute(lang, code, cb)
         : undefined,
+      // Remote executor
+      async (lang, code, cb) => {
+        if (!ws.socket) {
+          cb.onStderr('WebSocket not connected\r\n');
+          cb.onExit(1);
+          return;
+        }
+        const onStdout = (data: any) => cb.onStdout(data.data);
+        const onStderr = (data: any) => cb.onStderr(data.data);
+        const onCompleted = (data: any) => {
+          ws.socket!.off('execution:stdout', onStdout);
+          ws.socket!.off('execution:stderr', onStderr);
+          ws.socket!.off('execution:completed', onCompleted);
+          cb.onExit(data.exitCode);
+        };
+        ws.socket.on('execution:stdout', onStdout);
+        ws.socket.on('execution:stderr', onStderr);
+        ws.socket.on('execution:completed', onCompleted);
+        ws.socket.emit('execution:start', {
+          workspaceId,
+          fileId: fs.activeFileId,
+          language: lang,
+          code,
+        });
+      }
     );
   };
 
