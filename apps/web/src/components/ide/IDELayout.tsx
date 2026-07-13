@@ -679,14 +679,14 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
                   value={runTarget}
                   onChange={(e) => setRunTarget(e.target.value as any)}
                   className="ide-btn"
-                  style={{ height: '24px', padding: '0 6px', fontSize: '11px', outline: 'none', appearance: 'menulist' }}
+                  style={{ height: '24px', padding: '0 6px', fontSize: '11px', outline: 'none', appearance: 'menulist', backgroundColor: 'var(--ide-bg-light, #2e2e2e)', color: 'var(--ide-fg, #e0e0e0)' }}
                   disabled={!fs.activeFileId || editorLang === 'jupyter'}
                 >
-                  <option value="auto">Auto Select</option>
-                  <option value="browser">🌐 Browser</option>
-                  <option value="local-agent">💻 Local Agent</option>
-                  <option value="remote">☁️ CPU Worker</option>
-                  <option value="gpu-worker">🚀 GPU Worker</option>
+                  <option style={{ backgroundColor: '#2e2e2e', color: '#e0e0e0' }} value="auto">Auto Select</option>
+                  <option style={{ backgroundColor: '#2e2e2e', color: '#e0e0e0' }} value="browser">🌐 Browser</option>
+                  <option style={{ backgroundColor: '#2e2e2e', color: '#e0e0e0' }} value="local-agent">💻 Local Agent</option>
+                  <option style={{ backgroundColor: '#2e2e2e', color: '#e0e0e0' }} value="remote">☁️ CPU Worker</option>
+                  <option style={{ backgroundColor: '#2e2e2e', color: '#e0e0e0' }} value="gpu-worker">🚀 GPU Worker</option>
                 </select>
               )}
               {isExecuting ? (
