@@ -494,7 +494,8 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           code,
           target, // Passes 'remote' or 'gpu-worker'
         });
-      }
+      },
+      target
     );
   };
 

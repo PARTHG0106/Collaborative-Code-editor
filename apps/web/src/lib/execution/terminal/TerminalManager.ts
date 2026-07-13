@@ -72,16 +72,19 @@ export class TerminalManager {
 
   writeStdout(data: string) {
     this.terminal.write(data);
+    this.terminal.scrollToBottom();
   }
 
   writeStderr(data: string) {
     // Red color for stderr
     this.terminal.write(`\x1b[31m${data}\x1b[0m`);
+    this.terminal.scrollToBottom();
   }
 
   writeInfo(data: string) {
     // Cyan color for info
     this.terminal.write(`\x1b[36m${data}\x1b[0m`);
+    this.terminal.scrollToBottom();
   }
 
   onData(callback: (input: string) => void) {
