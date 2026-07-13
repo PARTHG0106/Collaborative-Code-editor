@@ -92,10 +92,10 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
               hf_token: process.env.HF_TOKEN 
             });
             
-            const result = await client.predict('/execute', { 
+            const result = await client.predict('/execute', [
               code, 
               language 
-            });
+            ]);
 
             const { stdout, stderr, exitCode: workerExitCode } = result.data[0];
 

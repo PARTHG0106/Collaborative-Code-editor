@@ -54,4 +54,4 @@ with gr.Blocks() as app:
     
     btn.click(execute_job, inputs=[code_input, lang_input], outputs=output, api_name="execute")
 
-app.launch(server_name="0.0.0.0", server_port=7860)
+app.launch(server_name="0.0.0.0", server_port=7860, share=True)
