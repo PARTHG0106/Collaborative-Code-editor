@@ -86,6 +86,11 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
           });
 
           try {
+            // Check if HF_TOKEN is present
+            if (!process.env.HF_TOKEN) {
+              throw new Error('HF_TOKEN is missing in the backend server environment variables. Please add it as a secret in your Hugging Face Space settings to authenticate and unlock your ZeroGPU quota.');
+            }
+
             // Call the Gradio API endpoint
             const { Client } = require('@gradio/client');
             const client = await Client.connect(worker.url, { 
