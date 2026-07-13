@@ -97,7 +97,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
               throw new Error(`GPU Worker failed: ${response.statusText}`);
             }
 
-            const result = await response.json();
+            const result = (await response.json()) as any;
             const { stdout, stderr, exitCode: workerExitCode } = result.data[0];
 
             if (stdout) io.to(`exec:${session.id}`).emit('execution:stdout', { sessionId: session.id, data: stdout, timestamp: Date.now() });
