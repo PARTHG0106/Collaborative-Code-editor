@@ -5,7 +5,7 @@ export type ExecutionTarget = 'browser' | 'local-agent' | 'remote';
 export interface RuntimeCallbacks {
   onStdout: (data: string) => void;
   onStderr: (data: string) => void;
-  onRequestInput: () => void;
+  onRequestInput?: () => void;
   onExit: (code: number) => void;
 }
 

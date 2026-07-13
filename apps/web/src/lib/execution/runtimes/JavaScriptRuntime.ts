@@ -21,7 +21,7 @@ export class JavaScriptRuntime {
         switch (type) {
           case 'stdout': callbacks.onStdout(data); break;
           case 'stderr': callbacks.onStderr(data); break;
-          case 'request-input': callbacks.onRequestInput(); break;
+          case 'request-input': callbacks.onRequestInput?.(); break;
           case 'exit':
             clearTimeout(timeout);
             URL.revokeObjectURL(url);

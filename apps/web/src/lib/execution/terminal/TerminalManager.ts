@@ -47,13 +47,10 @@ export class TerminalManager {
 
     // Handle user keyboard input for stdin
     this.terminal.onKey(({ key, domEvent }) => {
-      if (!this.isWaitingForInput) return;
-
       if (domEvent.key === 'Enter') {
         this.terminal.write('\r\n');
-        const input = this.inputBuffer;
+        const input = this.inputBuffer + '\n';
         this.inputBuffer = '';
-        this.isWaitingForInput = false;
         this.onInputSubmit?.(input);
       } else if (domEvent.key === 'Backspace') {
         if (this.inputBuffer.length > 0) {
@@ -87,18 +84,14 @@ export class TerminalManager {
     this.terminal.write(`\x1b[36m${data}\x1b[0m`);
   }
 
-  promptInput(callback: (input: string) => void) {
-    this.isWaitingForInput = true;
-    this.inputBuffer = '';
+  onData(callback: (input: string) => void) {
     this.onInputSubmit = callback;
-    this.terminal.focus();
   }
 
   clear() {
     this.terminal.clear();
     this.terminal.write('\x1b[2J\x1b[H');
     this.inputBuffer = '';
-    this.isWaitingForInput = false;
   }
 
   dispose() {

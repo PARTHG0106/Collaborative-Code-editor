@@ -58,7 +58,7 @@ export class PythonRuntime {
       // We store a JS callback on the window that Python can call
       (window as any).__syncscript_input = (promptText: string): Promise<string> => {
         if (promptText) callbacks.onStdout(promptText);
-        callbacks.onRequestInput();
+        callbacks.onRequestInput?.();
         return new Promise<string>((resolve) => {
           this.inputResolve = resolve;
         });

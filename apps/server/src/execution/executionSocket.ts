@@ -1,6 +1,8 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import prisma from '../lib/prisma.js';
 
+const activeProcesses = new Map<string, any>();
+
 /**
  * Execution socket event handlers.
  * These handle remote execution requests from the frontend when
@@ -8,6 +10,13 @@ import prisma from '../lib/prisma.js';
  */
 export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
   const user = socket.data.user as { id: string; name: string; email: string };
+
+  socket.on('execution:stdin', (payload: { data: string }) => {
+    const proc = activeProcesses.get(socket.id);
+    if (proc && proc.stdin) {
+      proc.stdin.write(payload.data);
+    }
+  });
 
   // User starts a remote execution
   socket.on('execution:start', async (payload: {
@@ -105,6 +114,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
 
         await new Promise<void>((resolve, reject) => {
           const proc = spawn(runCmd, runArgs, { cwd: tmpDir });
+          activeProcesses.set(socket.id, proc);
           
           let outputSize = 0;
           const MAX_SIZE = 1024 * 512; // 512 KB
@@ -142,12 +152,14 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
 
           proc.on('close', (code: number) => {
             clearTimeout(timeout);
+            activeProcesses.delete(socket.id);
             exitCode = isKilled ? 1 : code;
             resolve();
           });
 
           proc.on('error', (err: Error) => {
             clearTimeout(timeout);
+            activeProcesses.delete(socket.id);
             if (!isKilled) {
               io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: err.message + '\n', timestamp: Date.now() });
             }

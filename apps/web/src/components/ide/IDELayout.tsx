@@ -119,7 +119,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     // Retry every 10s
     const interval = setInterval(() => {
       if (!agent.isConnected()) {
-        agent.connect();
+        agent.connect().catch(() => {});
       }
     }, 10000);
 
@@ -128,6 +128,22 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
       agent.disconnect();
     };
   }, []);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Toggle Terminal (Ctrl+`)
+      if ((e.ctrlKey || e.metaKey) && e.key === '`') {
+        e.preventDefault();
+        setTerminalOpen(prev => !prev);
+        if (!terminalOpen) {
+          setTimeout(() => terminalManagerRef.current?.focus(), 50);
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [terminalOpen]);
 
   // File system hook
   const fs = useFileSystem(workspaceId);
@@ -431,11 +447,6 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
       {
         onStdout: (data) => terminalManagerRef.current?.writeStdout(data),
         onStderr: (data) => terminalManagerRef.current?.writeStderr(data),
-        onRequestInput: () => {
-          terminalManagerRef.current?.promptInput((input) => {
-            orchestratorRef.current.sendInput(input);
-          });
-        },
         onExit: (code) => {
           setIsExecuting(false);
           setExecutionTarget(null);
@@ -456,6 +467,12 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           cb.onExit(1);
           return;
         }
+        
+        // Handle input to remote server
+        orchestratorRef.current.setRemoteInputHandler((input) => {
+          ws.socket!.emit('execution:stdin', { sessionId: ws.socket!.id, data: input });
+        });
+
         const onStdout = (data: any) => cb.onStdout(data.data);
         const onStderr = (data: any) => cb.onStderr(data.data);
         const onCompleted = (data: any) => {
@@ -732,7 +749,12 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
             onClose={() => setTerminalOpen(false)}
             executionTarget={executionTarget}
             isRunning={isExecuting}
-            onTerminalReady={(manager) => { terminalManagerRef.current = manager; }}
+            onTerminalReady={(manager) => { 
+              terminalManagerRef.current = manager;
+              manager.onData((data) => {
+                orchestratorRef.current.sendInput(data);
+              });
+            }}
           />
 
           {/* Status Bar */}

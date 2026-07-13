@@ -28,6 +28,7 @@ export class ExecutionOrchestrator {
   private agentAvailable = false;
   private agentLanguages: string[] = [];
   private agentSendInput?: (text: string) => void;
+  private remoteSendInput?: (text: string) => void;
   private statusListeners: Array<(target: ExecutionTarget | null, running: boolean) => void> = [];
 
   private currentTarget: ExecutionTarget | null = null;
@@ -40,6 +41,10 @@ export class ExecutionOrchestrator {
 
   setAgentInputHandler(handler: (text: string) => void) {
     this.agentSendInput = handler;
+  }
+
+  setRemoteInputHandler(handler: (text: string) => void) {
+    this.remoteSendInput = handler;
   }
 
   onStatusChange(cb: (target: ExecutionTarget | null, running: boolean) => void) {
@@ -142,6 +147,8 @@ export class ExecutionOrchestrator {
       this.browserExecutor.sendInput(text);
     } else if (this.currentTarget === 'local-agent' && this.agentSendInput) {
       this.agentSendInput(text);
+    } else if (this.currentTarget === 'remote' && this.remoteSendInput) {
+      this.remoteSendInput(text);
     }
   }
 

@@ -96,7 +96,7 @@ export class AgentConnector {
               callbacks.onStderr(msg.data);
               break;
             case 'waiting-input':
-              callbacks.onRequestInput();
+              callbacks.onRequestInput?.();
               break;
             case 'exit':
               callbacks.onExit(msg.code ?? 0);
