@@ -87,17 +87,14 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
 
           try {
             // Call the Gradio API endpoint
-            const response = await fetch(`${worker.url}/api/execute`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ data: [code, language] })
+            const { Client } = require('@gradio/client');
+            const client = await Client.connect(worker.url);
+            
+            const result = await client.predict('/execute', { 
+              code, 
+              language 
             });
 
-            if (!response.ok) {
-              throw new Error(`GPU Worker failed: ${response.statusText}`);
-            }
-
-            const result = (await response.json()) as any;
             const { stdout, stderr, exitCode: workerExitCode } = result.data[0];
 
             if (stdout) io.to(`exec:${session.id}`).emit('execution:stdout', { sessionId: session.id, data: stdout, timestamp: Date.now() });
