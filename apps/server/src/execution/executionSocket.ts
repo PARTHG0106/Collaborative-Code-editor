@@ -106,21 +106,51 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
         await new Promise<void>((resolve, reject) => {
           const proc = spawn(runCmd, runArgs, { cwd: tmpDir });
           
+          let outputSize = 0;
+          const MAX_SIZE = 1024 * 512; // 512 KB
+          let isKilled = false;
+
+          const timeout = setTimeout(() => {
+            isKilled = true;
+            proc.kill('SIGKILL');
+            io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: '\n[Execution Timeout: 10 seconds exceeded]\n', timestamp: Date.now() });
+          }, 10000);
+
           proc.stdout.on('data', (data: Buffer) => {
+            if (isKilled) return;
+            outputSize += data.length;
+            if (outputSize > MAX_SIZE) {
+              isKilled = true;
+              proc.kill('SIGKILL');
+              io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: '\n[Execution Error: Output size limit exceeded]\n', timestamp: Date.now() });
+              return;
+            }
             io.to(`exec:${session.id}`).emit('execution:stdout', { sessionId: session.id, data: data.toString(), timestamp: Date.now() });
           });
           
           proc.stderr.on('data', (data: Buffer) => {
+            if (isKilled) return;
+            outputSize += data.length;
+            if (outputSize > MAX_SIZE) {
+              isKilled = true;
+              proc.kill('SIGKILL');
+              io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: '\n[Execution Error: Output size limit exceeded]\n', timestamp: Date.now() });
+              return;
+            }
             io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: data.toString(), timestamp: Date.now() });
           });
 
           proc.on('close', (code: number) => {
-            exitCode = code;
+            clearTimeout(timeout);
+            exitCode = isKilled ? 1 : code;
             resolve();
           });
 
           proc.on('error', (err: Error) => {
-            io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: err.message + '\n', timestamp: Date.now() });
+            clearTimeout(timeout);
+            if (!isKilled) {
+              io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: err.message + '\n', timestamp: Date.now() });
+            }
             exitCode = 1;
             resolve();
           });
