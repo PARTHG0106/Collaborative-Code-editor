@@ -15,7 +15,8 @@ interface TerminalPanelProps {
 const TARGET_CONFIG: Record<ExecutionTarget, { icon: React.ReactNode; label: string; color: string }> = {
   browser:       { icon: <Globe size={10} />,   label: 'Browser',  color: '#5E8B68' },
   'local-agent': { icon: <Monitor size={10} />, label: 'Local',    color: '#5D7FB5' },
-  remote:        { icon: <Cpu size={10} />,     label: 'Remote',   color: '#B19764' },
+  remote:        { icon: <Cpu size={10} />,     label: 'CPU Remote',color: '#B19764' },
+  'gpu-worker':  { icon: <Cpu size={10} />,     label: 'GPU Remote',color: '#9F5BBA' },
 };
 
 export const TerminalPanel: React.FC<TerminalPanelProps> = ({

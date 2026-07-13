@@ -1,6 +1,6 @@
 // ===== Execution Types =====
 
-export type ExecutionTarget = 'browser' | 'local-agent' | 'remote';
+export type ExecutionTarget = 'browser' | 'local-agent' | 'remote' | 'gpu-worker';
 
 export interface RuntimeCallbacks {
   onStdout: (data: string) => void;

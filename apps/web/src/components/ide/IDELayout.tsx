@@ -91,6 +91,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const [terminalOpen, setTerminalOpen] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [executionTarget, setExecutionTarget] = useState<ExecutionTarget | null>(null);
+  const [runTarget, setRunTarget] = useState<'auto' | ExecutionTarget>('auto');
   const [agentConnected, setAgentConnected] = useState(false);
   const orchestratorRef = useRef(new ExecutionOrchestrator());
   const terminalManagerRef = useRef<TerminalManager | null>(null);
@@ -436,11 +437,13 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
       retries++;
     }
     
-    terminalManagerRef.current?.clear();
-
-    const target = orchestratorRef.current.selectTarget(lang);
+    const target = runTarget === 'auto' ? orchestratorRef.current.selectTarget(lang) : runTarget;
     setExecutionTarget(target);
 
+    // If manual target is unsupported by Browser/Agent, it falls back to Remote/GPU in execute.
+    // For now we just pass it to execute (we might need to update ExecutionOrchestrator to accept an override target).
+    // Wait, ExecutionOrchestrator currently selects its own target internally!
+    // Let's pass the override target.
     await orchestratorRef.current.execute(
       file.name,
       editorContent,
@@ -461,7 +464,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
         ? (lang, code, cb) => agentRef.current.execute(lang, code, cb)
         : undefined,
       // Remote executor
-      async (lang, code, cb) => {
+      async (lang, code, cb, target) => {
         if (!ws.socket) {
           cb.onStderr('WebSocket not connected\r\n');
           cb.onExit(1);
@@ -489,6 +492,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           fileId: fs.activeFileId,
           language: lang,
           code,
+          target, // Passes 'remote' or 'gpu-worker'
         });
       }
     );
@@ -670,6 +674,21 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
             
             {/* Run / Stop Button */}
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: '8px', gap: '4px' }}>
+              {!isExecuting && (
+                <select
+                  value={runTarget}
+                  onChange={(e) => setRunTarget(e.target.value as any)}
+                  className="ide-btn"
+                  style={{ height: '24px', padding: '0 6px', fontSize: '11px', outline: 'none', appearance: 'menulist' }}
+                  disabled={!fs.activeFileId || editorLang === 'jupyter'}
+                >
+                  <option value="auto">Auto Select</option>
+                  <option value="browser">🌐 Browser</option>
+                  <option value="local-agent">💻 Local Agent</option>
+                  <option value="remote">☁️ CPU Worker</option>
+                  <option value="gpu-worker">🚀 GPU Worker</option>
+                </select>
+              )}
               {isExecuting ? (
                 <button 
                   className="ide-btn" 

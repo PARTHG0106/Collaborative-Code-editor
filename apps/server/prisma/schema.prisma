@@ -145,6 +145,8 @@ enum ExecutionTarget {
   BROWSER
   LOCAL_AGENT
   REMOTE
+  CPU_WORKER
+  GPU_WORKER
 }
 
 model ExecutionSession {
@@ -209,4 +211,18 @@ model TerminalSession {
 
   @@index([workspaceId])
   @@map("terminal_sessions")
+}
+
+model ExecutionWorker {
+  id            String   @id @default(cuid())
+  url           String   @unique
+  account       String
+  type          String   // "GPU" or "CPU"
+  status        String   // "IDLE", "BUSY", "OFFLINE"
+  lastHeartbeat DateTime @default(now()) @map("last_heartbeat")
+  activeJobs    Int      @default(0) @map("active_jobs")
+  dailyFailures Int      @default(0) @map("daily_failures")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("execution_workers")
 }

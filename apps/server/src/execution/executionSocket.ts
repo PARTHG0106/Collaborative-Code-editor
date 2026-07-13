@@ -24,8 +24,9 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
     fileId: string;
     language: string;
     code: string;
+    target?: string;
   }) => {
-    const { workspaceId, fileId, language, code } = payload;
+    const { workspaceId, fileId, language, code, target = 'REMOTE' } = payload;
 
     try {
       // Create execution session record
@@ -36,7 +37,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
           userId: user.id,
           language,
           code,
-          target: 'REMOTE',
+          target: target === 'gpu-worker' ? 'GPU_WORKER' : 'REMOTE',
           status: 'QUEUED',
         },
       });
@@ -51,7 +52,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
         userId: user.id,
         userName: user.name,
         language,
-        target: 'remote',
+        target,
       });
 
       // Update status to running
@@ -60,8 +61,63 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
         data: { status: 'RUNNING', startedAt: new Date() },
       });
 
-      // Execute natively on the backend server
-      const { execSync, spawn } = require('child_process');
+      let exitCode = 0;
+
+      if (target === 'gpu-worker') {
+        try {
+          if (language !== 'python') {
+            throw new Error('GPU worker currently only supports Python execution.');
+          }
+
+          // Fetch an available GPU worker
+          const worker = await prisma.executionWorker.findFirst({
+            where: { type: 'GPU', status: 'IDLE' },
+            orderBy: { lastHeartbeat: 'desc' }
+          });
+
+          if (!worker) {
+            throw new Error('No GPU workers currently available. Please try again later.');
+          }
+
+          // Mark worker as busy
+          await prisma.executionWorker.update({
+            where: { id: worker.id },
+            data: { status: 'BUSY', activeJobs: { increment: 1 } }
+          });
+
+          try {
+            // Call the Gradio API endpoint
+            const response = await fetch(`${worker.url}/api/execute`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ data: [code, language] })
+            });
+
+            if (!response.ok) {
+              throw new Error(`GPU Worker failed: ${response.statusText}`);
+            }
+
+            const result = await response.json();
+            const { stdout, stderr, exitCode: workerExitCode } = result.data[0];
+
+            if (stdout) io.to(`exec:${session.id}`).emit('execution:stdout', { sessionId: session.id, data: stdout, timestamp: Date.now() });
+            if (stderr) io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: stderr, timestamp: Date.now() });
+            
+            exitCode = workerExitCode;
+          } finally {
+            // Free the worker
+            await prisma.executionWorker.update({
+              where: { id: worker.id },
+              data: { status: 'IDLE', activeJobs: { decrement: 1 }, lastHeartbeat: new Date() }
+            });
+          }
+        } catch (e: any) {
+          io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: e.message + '\n', timestamp: Date.now() });
+          exitCode = 1;
+        }
+      } else {
+        // Execute natively on the backend server (CPU/Remote)
+        const { execSync, spawn } = require('child_process');
       const fs = require('fs');
       const path = require('path');
       const os = require('os');
@@ -99,8 +155,6 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
       } else {
         throw new Error(`Native remote execution not implemented for language: ${language}`);
       }
-
-      let exitCode = 0;
 
       try {
         if (compileCmd) {
@@ -173,6 +227,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
       } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
+      } // <-- end of else block
 
       await prisma.executionSession.update({
         where: { id: session.id },

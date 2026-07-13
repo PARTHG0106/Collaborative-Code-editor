@@ -67,7 +67,9 @@ export class ExecutionOrchestrator {
     switch (target) {
       case 'browser': return '🌐 Browser';
       case 'local-agent': return '💻 Local';
-      case 'remote': return '☁️ Remote';
+      case 'remote': return '☁️ Remote (CPU)';
+      case 'gpu-worker': return '🚀 GPU Worker';
+      default: return 'Unknown';
     }
   }
 
@@ -77,7 +79,8 @@ export class ExecutionOrchestrator {
     callbacks: RuntimeCallbacks,
     // Optional overrides for agent/remote execution
     agentExecute?: (lang: string, code: string, cb: RuntimeCallbacks) => Promise<void>,
-    remoteExecute?: (lang: string, code: string, cb: RuntimeCallbacks) => Promise<void>,
+    remoteExecute?: (lang: string, code: string, cb: RuntimeCallbacks, target: ExecutionTarget) => Promise<void>,
+    targetOverride?: ExecutionTarget
   ) {
     const language = getLangFromFilename(filename);
     if (!language) {
@@ -86,7 +89,7 @@ export class ExecutionOrchestrator {
       return;
     }
 
-    const target = this.selectTarget(language);
+    const target = targetOverride || this.selectTarget(language);
     this.emitStatus(target, true);
 
     callbacks.onStdout(`\x1b[36m[${this.getTargetLabel(target)} | ${language}]\x1b[0m\r\n`);
@@ -127,8 +130,9 @@ export class ExecutionOrchestrator {
           }
           break;
         case 'remote':
+        case 'gpu-worker':
           if (remoteExecute) {
-            await remoteExecute(language, code, wrappedCallbacks);
+            await remoteExecute(language, code, wrappedCallbacks, target);
           } else {
             wrappedCallbacks.onStderr('Remote execution not configured\r\n');
             wrappedCallbacks.onExit(1);
