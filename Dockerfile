@@ -13,4 +13,4 @@ WORKDIR /app
 COPY --from=builder /app ./
 EXPOSE 7860
 ENV PORT=7860
-CMD npx prisma db push --schema=apps/server/prisma/schema.prisma --accept-data-loss && node apps/server/dist/index.js
+CMD npm run db:push --workspace=apps/server -- --accept-data-loss && node apps/server/dist/index.js
