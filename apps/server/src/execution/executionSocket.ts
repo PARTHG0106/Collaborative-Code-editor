@@ -65,8 +65,8 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
 
       if (target === 'gpu-worker') {
         try {
-          if (language !== 'python') {
-            throw new Error('GPU worker currently only supports Python execution.');
+          if (!['python', 'cpp', 'c'].includes(language)) {
+            throw new Error(`GPU worker currently does not support ${language} execution.`);
           }
 
           // Fetch an available GPU worker
