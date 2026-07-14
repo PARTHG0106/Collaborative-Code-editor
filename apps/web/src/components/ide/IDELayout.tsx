@@ -171,6 +171,21 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     }
   }, [isExecuting]);
 
+  useEffect(() => {
+    if (ws.socket) {
+      ws.socket.emit('terminal:spawn');
+      
+      const onConnect = () => {
+        ws.socket?.emit('terminal:spawn');
+      };
+      
+      ws.socket.on('connect', onConnect);
+      return () => {
+        ws.socket?.off('connect', onConnect);
+      };
+    }
+  }, [ws.socket]);
+
   // Versions
   const [versions, setVersions] = useState<any[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);

@@ -103,7 +103,7 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
       </div>
 
       {/* Terminal Body */}
-      <div ref={containerRef} style={{ flex: 1, padding: '4px 0 0 4px' }} />
+      <div ref={containerRef} style={{ flex: 1, overflow: 'hidden', padding: '4px 0 0 4px' }} />
     </div>
   );
 };
