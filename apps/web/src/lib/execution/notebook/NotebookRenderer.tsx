@@ -126,8 +126,9 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
                 fontSize: 13, padding: { top: 0, bottom: 0 },
                 automaticLayout: true, wordWrap: 'on',
                 overviewRulerLanes: 0, hideCursorInOverviewRuler: true,
-                scrollbar: { vertical: 'hidden', horizontal: 'hidden' },
+                scrollbar: { vertical: 'hidden', horizontal: 'hidden', alwaysConsumeMouseWheel: false },
                 renderLineHighlight: 'none',
+                mouseWheelZoom: false,
               }}
             />
           </div>

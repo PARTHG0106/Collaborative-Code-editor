@@ -159,6 +159,11 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const localVersionRef = useRef(0);
   const isRemoteEditRef = useRef(false);
   const decorationsRef = useRef<Map<string, string[]>>(new Map());
+  const activeFileIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    activeFileIdRef.current = fs.activeFileId;
+  }, [fs.activeFileId]);
 
   // Versions
   const [versions, setVersions] = useState<any[]>([]);
@@ -262,9 +267,9 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     editor.onDidChangeModelContent((e: any) => {
       if (isRemoteEditRef.current) return;
       e.changes.forEach((c: any) => {
-        if (socketRef.current && fs.activeFileId) {
+        if (socketRef.current && activeFileIdRef.current) {
           socketRef.current.emit('edit_file', {
-            fileId: fs.activeFileId,
+            fileId: activeFileIdRef.current,
             baseVersion: localVersionRef.current,
             edit: { offset: c.rangeOffset, text: c.text, length: c.rangeLength }
           });
@@ -275,11 +280,11 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     });
 
     editor.onDidChangeCursorPosition((e: any) => {
-      if (socketRef.current && fs.activeFileId) {
+      if (socketRef.current && activeFileIdRef.current) {
         const model = editor.getModel();
         if (model) {
           socketRef.current.emit('cursor_move', {
-            fileId: fs.activeFileId,
+            fileId: activeFileIdRef.current,
             cursor: { lineNumber: e.position.lineNumber, column: e.position.column, offset: model.getOffsetAt(e.position) }
           });
         }
@@ -771,8 +776,19 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
             isRunning={isExecuting}
             onTerminalReady={(manager) => { 
               terminalManagerRef.current = manager;
+              
+              if (ws.socket) {
+                ws.socket.on('terminal:output', (payload: any) => {
+                  manager.writeStdout(payload.data);
+                });
+              }
+
               manager.onData((data) => {
-                orchestratorRef.current.sendInput(data);
+                if (orchestratorRef.current.getIsRunning()) {
+                  orchestratorRef.current.sendInput(data);
+                } else if (ws.socket) {
+                  ws.socket.emit('terminal:command', { command: data });
+                }
               });
             }}
           />

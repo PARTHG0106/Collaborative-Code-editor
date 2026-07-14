@@ -9,7 +9,7 @@ import uuid
 # Restrict to 60 seconds
 @spaces.GPU(duration=60)
 def execute_job(code: str, language: str):
-    if language not in ["python", "cpp", "c"]:
+    if language not in ["python", "cpp", "c", "javascript", "typescript", "java"]:
         return {"error": f"GPU worker currently does not support {language} execution.", "exitCode": 1}
 
     temp_dir = tempfile.mkdtemp()
@@ -68,6 +68,48 @@ def execute_job(code: str, language: str):
                 "stdout": run_result.stdout,
                 "stderr": run_result.stderr,
                 "exitCode": run_result.returncode
+            }
+
+        elif language in ["javascript", "typescript"]:
+            ext = "js" if language == "javascript" else "ts"
+            file_path = os.path.join(temp_dir, f"script_{uuid.uuid4().hex}.{ext}")
+            with open(file_path, "w") as f:
+                f.write(code)
+
+            if language == "typescript":
+                # Assuming tsx or ts-node isn't necessarily available globally,
+                # but if node is available, let's just try running it via npx tsx
+                cmd = ["npx", "-y", "tsx", file_path]
+            else:
+                cmd = ["node", file_path]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=58
+            )
+            return {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "exitCode": result.returncode
+            }
+
+        elif language == "java":
+            file_path = os.path.join(temp_dir, "Main.java")
+            with open(file_path, "w") as f:
+                f.write(code)
+                
+            result = subprocess.run(
+                ["java", file_path],
+                capture_output=True,
+                text=True,
+                timeout=58
+            )
+            return {
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "exitCode": result.returncode
             }
             
     except subprocess.TimeoutExpired:

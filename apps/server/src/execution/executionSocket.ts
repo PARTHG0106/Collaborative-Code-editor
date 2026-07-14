@@ -65,7 +65,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
 
       if (target === 'gpu-worker') {
         try {
-          if (!['python', 'cpp', 'c'].includes(language)) {
+          if (!['python', 'cpp', 'c', 'javascript', 'typescript', 'java'].includes(language)) {
             throw new Error(`GPU worker currently does not support ${language} execution.`);
           }
 
@@ -181,8 +181,8 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
           const timeout = setTimeout(() => {
             isKilled = true;
             proc.kill('SIGKILL');
-            io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: '\n[Execution Timeout: 10 seconds exceeded]\n', timestamp: Date.now() });
-          }, 10000);
+            io.to(`exec:${session.id}`).emit('execution:stderr', { sessionId: session.id, data: '\n[Execution Timeout: 20 seconds exceeded]\n', timestamp: Date.now() });
+          }, 20000);
 
           proc.stdout.on('data', (data: Buffer) => {
             if (isKilled) return;
@@ -270,6 +270,23 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
   // User sends stdin to a running execution
   socket.on('execution:stdin', ({ sessionId, data }: { sessionId: string; data: string }) => {
     io.to(`exec:${sessionId}`).emit('execution:stdin', { sessionId, data });
+    
+    // Attempt to write to the local process if it exists
+    const proc = activeProcesses.get(socket.id);
+    if (proc && proc.stdin) {
+      try { proc.stdin.write(data); } catch {}
+    }
+  });
+
+  // Shell command when no execution is running
+  socket.on('terminal:command', ({ command }: { command: string }) => {
+    const { exec } = require('child_process');
+    // Using an arbitrary tmpDir or workspace dir. For safety, just use process.cwd() or similar.
+    exec(command, { cwd: process.cwd() }, (err: any, stdout: string, stderr: string) => {
+      if (stdout) socket.emit('terminal:output', { data: stdout });
+      if (stderr) socket.emit('terminal:output', { data: `\x1b[31m${stderr}\x1b[0m` });
+      if (err && err.code) socket.emit('terminal:output', { data: `\r\n\x1b[31m[Process exited with code ${err.code}]\x1b[0m\r\n` });
+    });
   });
 
   // User cancels execution

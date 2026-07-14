@@ -1,0 +1,3 @@
+default-jre
+nodejs
+npm
