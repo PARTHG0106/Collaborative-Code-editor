@@ -94,7 +94,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
             // Call the Gradio API endpoint
             const { Client } = require('@gradio/client');
             const client = await Client.connect(worker.url, { 
-              hf_token: process.env.HF_TOKEN 
+              token: process.env.HF_TOKEN 
             });
             
             const result = await client.predict('/execute', [
