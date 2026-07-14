@@ -261,6 +261,43 @@ export function initSocketServer(httpServer: HTTPServer): SocketIOServer {
           where: { id: fileId },
           data: { content: afterContent }
         });
+        
+        // Sync to disk for terminal/execution
+        if (fileState) {
+          const dbItem = await prisma.fileSystemItem.findUnique({
+            where: { id: fileId },
+            include: { parent: true } // just for basic structure, though complex trees need full path
+          });
+          
+          if (dbItem && dbItem.workspaceId) {
+            const fs = require('fs');
+            const path = require('path');
+            const os = require('os');
+            const wsDir = path.join(os.tmpdir(), `syncscript_ws_${dbItem.workspaceId}`);
+            
+            if (fs.existsSync(wsDir)) {
+              // Note: This simplistic sync assumes a flat workspace for now, or relies on name.
+              // For full tree sync, it would need the same getFilePath logic as terminal:spawn.
+              // We'll just write to name for now, or if it's deeply nested it might write to root.
+              // To make it robust, let's fetch full tree.
+              const allFiles = await prisma.fileSystemItem.findMany({ where: { workspaceId: dbItem.workspaceId } });
+              const fileMap = new Map();
+              allFiles.forEach((f: any) => fileMap.set(f.id, f));
+              
+              function getFilePath(id: string): string {
+                const f = fileMap.get(id);
+                if (!f) return '';
+                if (!f.parentId) return f.name;
+                return path.join(getFilePath(f.parentId), f.name);
+              }
+              
+              const fullPath = path.join(wsDir, getFilePath(fileId));
+              const dir = path.dirname(fullPath);
+              if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+              fs.writeFileSync(fullPath, afterContent);
+            }
+          }
+        }
       } catch (err) {
         console.error(`Failed to persist socket edit for file ${fileId}:`, err);
       }

@@ -125,39 +125,49 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
       } else {
         // Execute natively on the backend server (CPU/Remote)
         const { execSync, spawn } = require('child_process');
-      const fs = require('fs');
-      const path = require('path');
-      const os = require('os');
-      
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'syncscript-exec-'));
-      let compileCmd = null;
-      let runCmd = '';
-      let runArgs: string[] = [];
-      let sourceFile = '';
-      
-      if (language === 'cpp' || language === 'c') {
-        const ext = language === 'cpp' ? 'cpp' : 'c';
-        const compiler = language === 'cpp' ? 'g++' : 'gcc';
-        sourceFile = path.join(tmpDir, `main.${ext}`);
-        const outFile = path.join(tmpDir, 'main.out');
-        fs.writeFileSync(sourceFile, code);
-        compileCmd = `${compiler} ${sourceFile} -o ${outFile}`;
-        runCmd = outFile;
-      } else if (language === 'python') {
-        sourceFile = path.join(tmpDir, 'main.py');
-        fs.writeFileSync(sourceFile, code);
-        runCmd = 'python3';
-        runArgs = [sourceFile];
-      } else if (language === 'javascript') {
-        sourceFile = path.join(tmpDir, 'main.js');
-        fs.writeFileSync(sourceFile, code);
-        runCmd = 'node';
-        runArgs = [sourceFile];
-      } else if (language === 'java') {
-        sourceFile = path.join(tmpDir, 'Main.java');
-        fs.writeFileSync(sourceFile, code);
-        compileCmd = `javac ${sourceFile}`;
-        runCmd = 'java';
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+        
+        // Execute inside the materialized workspace folder
+        const tmpDir = path.join(os.tmpdir(), `syncscript_ws_${workspaceId}`);
+        if (!fs.existsSync(tmpDir)) {
+          fs.mkdirSync(tmpDir, { recursive: true });
+        }
+        
+        let compileCmd = null;
+        let runCmd = '';
+        let runArgs: string[] = [];
+        let sourceFile = '';
+        
+        // Instead of writing to a random main.ext, we fetch the actual file name
+        const dbFile = await prisma.fileSystemItem.findUnique({ where: { id: fileId || '' } });
+        const fileName = dbFile?.name || 'main';
+        
+        if (language === 'cpp' || language === 'c') {
+          const ext = language === 'cpp' ? 'cpp' : 'c';
+          const compiler = language === 'cpp' ? 'g++' : 'gcc';
+          sourceFile = path.join(tmpDir, dbFile ? fileName : `main.${ext}`);
+          const outFile = path.join(tmpDir, 'main.out');
+          fs.writeFileSync(sourceFile, code);
+          compileCmd = `${compiler} ${sourceFile} -o ${outFile}`;
+          runCmd = outFile;
+        } else if (language === 'python') {
+          sourceFile = path.join(tmpDir, dbFile ? fileName : 'main.py');
+          fs.writeFileSync(sourceFile, code);
+          runCmd = 'python3';
+          runArgs = [sourceFile];
+        } else if (language === 'javascript') {
+          sourceFile = path.join(tmpDir, dbFile ? fileName : 'main.js');
+          fs.writeFileSync(sourceFile, code);
+          runCmd = 'node';
+          runArgs = [sourceFile];
+        } else if (language === 'java') {
+          sourceFile = path.join(tmpDir, dbFile ? fileName : 'Main.java');
+          fs.writeFileSync(sourceFile, code);
+          compileCmd = `javac ${sourceFile}`;
+          runCmd = 'java';
+          runArgs = [path.basename(sourceFile, '.java')];
         runArgs = ['-cp', tmpDir, 'Main'];
       } else {
         throw new Error(`Native remote execution not implemented for language: ${language}`);
@@ -281,16 +291,61 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
     }
   });
 
-  socket.on('terminal:spawn', () => {
+  socket.on('terminal:spawn', async ({ workspaceId }: { workspaceId?: string }) => {
     if (ptyProcesses.has(socket.id)) return;
     
+    let cwd = process.cwd();
+    
+    if (workspaceId) {
+      try {
+        const fs = require('fs');
+        const path = require('path');
+        const os = require('os');
+        const wsDir = path.join(os.tmpdir(), `syncscript_ws_${workspaceId}`);
+        
+        if (!fs.existsSync(wsDir)) {
+          fs.mkdirSync(wsDir, { recursive: true });
+        }
+        
+        // Fetch files from DB
+        const files = await prisma.fileSystemItem.findMany({
+          where: { workspaceId }
+        });
+        
+        const fileMap = new Map();
+        files.forEach((f: any) => fileMap.set(f.id, f));
+        
+        function getFilePath(fileId: string): string {
+          const f = fileMap.get(fileId);
+          if (!f) return '';
+          if (!f.parentId) return f.name;
+          return path.join(getFilePath(f.parentId), f.name);
+        }
+        
+        for (const f of files) {
+          const fullPath = path.join(wsDir, getFilePath(f.id));
+          if (f.type === 'FOLDER') {
+            if (!fs.existsSync(fullPath)) fs.mkdirSync(fullPath, { recursive: true });
+          } else {
+            const dir = path.dirname(fullPath);
+            if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+            fs.writeFileSync(fullPath, f.content || '');
+          }
+        }
+        
+        cwd = wsDir;
+      } catch (e) {
+        console.error('Failed to materialize workspace for terminal:', e);
+      }
+    }
+
     const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
     try {
       const ptyProcess = pty.spawn(shell, [], {
         name: 'xterm-color',
         cols: 80,
         rows: 30,
-        cwd: process.cwd(),
+        cwd,
         env: process.env as any
       });
 
