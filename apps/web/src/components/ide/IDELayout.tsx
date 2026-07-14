@@ -173,10 +173,10 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
 
   useEffect(() => {
     if (ws.socket) {
-      ws.socket.emit('terminal:spawn');
+      ws.socket.emit('terminal:spawn', { workspaceId });
       
       const onConnect = () => {
-        ws.socket?.emit('terminal:spawn');
+        ws.socket?.emit('terminal:spawn', { workspaceId });
       };
       
       ws.socket.on('connect', onConnect);
@@ -184,7 +184,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
         ws.socket?.off('connect', onConnect);
       };
     }
-  }, [ws.socket]);
+  }, [ws.socket, workspaceId]);
 
   // Versions
   const [versions, setVersions] = useState<any[]>([]);
@@ -816,7 +816,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
 
               // Also request a terminal spawn if not spawned
               if (ws.socket) {
-                ws.socket.emit('terminal:spawn');
+                ws.socket.emit('terminal:spawn', { workspaceId });
               }
             }}
           />

@@ -291,7 +291,8 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
     }
   });
 
-  socket.on('terminal:spawn', async ({ workspaceId }: { workspaceId?: string }) => {
+  socket.on('terminal:spawn', async (payload: { workspaceId?: string } = {}) => {
+    const { workspaceId } = payload;
     if (ptyProcesses.has(socket.id)) return;
     
     let cwd = process.cwd();
