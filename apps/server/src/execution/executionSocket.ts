@@ -1,7 +1,10 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import prisma from '../lib/prisma.js';
+import * as pty from 'node-pty';
+import os from 'os';
 
 const activeProcesses = new Map<string, any>();
+const ptyProcesses = new Map<string, pty.IPty>();
 
 /**
  * Execution socket event handlers.
@@ -278,15 +281,42 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
     }
   });
 
-  // Shell command when no execution is running
-  socket.on('terminal:command', ({ command }: { command: string }) => {
-    const { exec } = require('child_process');
-    // Using an arbitrary tmpDir or workspace dir. For safety, just use process.cwd() or similar.
-    exec(command, { cwd: process.cwd() }, (err: any, stdout: string, stderr: string) => {
-      if (stdout) socket.emit('terminal:output', { data: stdout });
-      if (stderr) socket.emit('terminal:output', { data: `\x1b[31m${stderr}\x1b[0m` });
-      if (err && err.code) socket.emit('terminal:output', { data: `\r\n\x1b[31m[Process exited with code ${err.code}]\x1b[0m\r\n` });
-    });
+  socket.on('terminal:spawn', () => {
+    if (ptyProcesses.has(socket.id)) return;
+    
+    const shell = os.platform() === 'win32' ? 'powershell.exe' : 'bash';
+    try {
+      const ptyProcess = pty.spawn(shell, [], {
+        name: 'xterm-color',
+        cols: 80,
+        rows: 30,
+        cwd: process.cwd(),
+        env: process.env as any
+      });
+
+      ptyProcess.onData((data) => {
+        socket.emit('terminal:output', { data });
+      });
+
+      ptyProcesses.set(socket.id, ptyProcess);
+      
+      socket.on('disconnect', () => {
+        const proc = ptyProcesses.get(socket.id);
+        if (proc) {
+          proc.kill();
+          ptyProcesses.delete(socket.id);
+        }
+      });
+    } catch (e) {
+      console.error('Failed to spawn PTY', e);
+    }
+  });
+
+  socket.on('terminal:data', ({ data }: { data: string }) => {
+    const ptyProcess = ptyProcesses.get(socket.id);
+    if (ptyProcess) {
+      ptyProcess.write(data);
+    }
   });
 
   // User cancels execution

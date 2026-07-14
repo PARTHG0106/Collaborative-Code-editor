@@ -7,6 +7,8 @@ export class TerminalManager {
   private fitAddon: FitAddon;
   private inputBuffer = '';
   private onInputSubmit?: (data: string) => void;
+  private onRawDataCallback?: (data: string) => void;
+  private isRawMode = false;
   private isWaitingForInput = false;
   private resizeObserver: ResizeObserver | null = null;
 
@@ -45,8 +47,11 @@ export class TerminalManager {
       try { this.fitAddon.fit(); } catch {}
     });
 
-    // Handle user keyboard input for stdin
+    // Handle user keyboard input for stdin (line-buffered for code execution)
     this.terminal.onKey(({ key, domEvent }) => {
+      // If we are passing raw data, let the PTY handle everything (no local echo/buffering)
+      if (this.isRawMode) return;
+
       if (domEvent.key === 'Enter') {
         this.terminal.write('\r\n');
         const input = this.inputBuffer + '\n';
@@ -60,6 +65,13 @@ export class TerminalManager {
       } else if (key.length === 1 && !domEvent.ctrlKey && !domEvent.altKey && !domEvent.metaKey) {
         this.inputBuffer += key;
         this.terminal.write(key);
+      }
+    });
+
+    // Handle raw data for PTY
+    this.terminal.onData((data) => {
+      if (this.isRawMode) {
+        this.onRawDataCallback?.(data);
       }
     });
 
@@ -89,6 +101,14 @@ export class TerminalManager {
 
   onData(callback: (input: string) => void) {
     this.onInputSubmit = callback;
+  }
+
+  onRawData(callback: (data: string) => void) {
+    this.onRawDataCallback = callback;
+  }
+
+  setRawMode(raw: boolean) {
+    this.isRawMode = raw;
   }
 
   clear() {

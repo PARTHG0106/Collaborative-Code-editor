@@ -165,6 +165,12 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     activeFileIdRef.current = fs.activeFileId;
   }, [fs.activeFileId]);
 
+  useEffect(() => {
+    if (terminalManagerRef.current) {
+      terminalManagerRef.current.setRawMode(!isExecuting);
+    }
+  }, [isExecuting]);
+
   // Versions
   const [versions, setVersions] = useState<any[]>([]);
   const [versionsLoading, setVersionsLoading] = useState(false);
@@ -776,6 +782,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
             isRunning={isExecuting}
             onTerminalReady={(manager) => { 
               terminalManagerRef.current = manager;
+              manager.setRawMode(!isExecuting);
               
               if (ws.socket) {
                 ws.socket.on('terminal:output', (payload: any) => {
@@ -783,13 +790,19 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
                 });
               }
 
-              manager.onData((data) => {
+              manager.onRawData((data) => {
                 if (orchestratorRef.current.getIsRunning()) {
-                  orchestratorRef.current.sendInput(data);
+                  const input = data === '\r' ? '\n' : data;
+                  orchestratorRef.current.sendInput(input);
                 } else if (ws.socket) {
-                  ws.socket.emit('terminal:command', { command: data });
+                  ws.socket.emit('terminal:data', { data });
                 }
               });
+
+              // Also request a terminal spawn if not spawned
+              if (ws.socket) {
+                ws.socket.emit('terminal:spawn');
+              }
             }}
           />
 
