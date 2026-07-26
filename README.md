@@ -1,3 +1,11 @@
+---
+title: My App Space
+emoji: 🚀
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 3000
+---
 
 # SyncScript - Collaborative Real-Time Code Editor
 
