@@ -5,6 +5,20 @@ import { normalizeOrigin, originAllowlist } from '../lib/corsOrigins.js';
 const router = Router();
 
 /**
+ * Names the most recent change to request handling. Bumped deliberately so a
+ * running deployment can be tied to a commit: a middleware-level change is
+ * otherwise invisible from outside, which makes it impossible to tell whether a
+ * browser symptom is coming from old code still in service.
+ */
+const BUILD_MARKER = 'explicit-preflight-handler';
+
+/** Reflects the fix under investigation, which cannot be observed via GET. */
+const FEATURES = {
+  explicitPreflightHandler: true,
+  normalizedOriginMatching: true,
+};
+
+/**
  * GET /api/health
  * Returns server and database health status.
  */
@@ -24,6 +38,8 @@ router.get('/', async (_req: Request, res: Response) => {
         uptime: process.uptime(),
         environment: process.env.NODE_ENV || 'development',
         version: '0.1.0',
+        build: BUILD_MARKER,
+        features: FEATURES,
         services: {
           database: {
             status: 'connected',
@@ -39,6 +55,7 @@ router.get('/', async (_req: Request, res: Response) => {
         status: 'unhealthy',
         timestamp: new Date().toISOString(),
         uptime: process.uptime(),
+        build: BUILD_MARKER,
         services: {
           database: {
             status: 'disconnected',
@@ -59,6 +76,7 @@ router.get('/ping', (_req: Request, res: Response) => {
     success: true,
     data: {
       message: 'pong',
+      build: BUILD_MARKER,
       timestamp: new Date().toISOString(),
     },
   });
@@ -84,6 +102,8 @@ router.get('/cors', (req: Request, res: Response) => {
   res.json({
     success: true,
     data: {
+      build: BUILD_MARKER,
+      features: FEATURES,
       allowlist: {
         entries: originAllowlist.entries,
         exact: originAllowlist.exact,
