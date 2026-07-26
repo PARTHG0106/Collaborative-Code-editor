@@ -15,7 +15,5 @@ jobs:
       - name: Push to Hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          HF_USER: ${{ secrets.YOUR_HF_USERNAME }}
-          HF_SPACE: ${{ secrets.YOUR_SPACE_NAME }}
         run: |
-          git push --force https://$HF_USER:$HF_TOKEN@huggingface.co/spaces/$HF_USER/$HF_SPACE main
+          git push --force https://Parthg0106:$HF_TOKEN@huggingface.co/spaces/Parthg0106/syncscript-api main
