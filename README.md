@@ -117,3 +117,4 @@ npm run build
 
 <!-- Trigger deployment: updated db connection configs -->
 
+Project Live at: Parthg0106.dev
