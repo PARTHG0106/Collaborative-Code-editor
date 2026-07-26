@@ -35,7 +35,7 @@ const MAX_STDIN_BYTES = 8192;
 
 /**
  * Filenames that are safe to hand to a compiler as an argv element. The old
- * validation rejected only / and \, which still allowed ; ( ) and backticks —
+ * validation rejected only / and \, which still allowed ; ( ) and backticks -
  * enough to inject a command once the name was interpolated into a shell
  * string.
  */
@@ -72,9 +72,9 @@ function buildSafeEnv(cwd: string): Record<string, string> {
  * Accepts the URL shapes people actually store for a Space and returns an
  * origin we can call.
  *
- * "owner/space"                            -> https://owner-space.hf.space
- * "https://huggingface.co/spaces/o/s"      -> https://o-s.hf.space
- * "https://owner-space.hf.space/"          -> unchanged, trailing slash removed
+ *   "owner/space"                        -> https://owner-space.hf.space
+ *   "https://huggingface.co/spaces/o/s"  -> https://o-s.hf.space
+ *   "https://owner-space.hf.space/"      -> same, trailing slash removed
  *
  * A huggingface.co/spaces/... URL or a trailing slash produces the same
  * "Could not resolve app config." failure, so normalize rather than trust it.
@@ -83,8 +83,10 @@ export function normalizeSpaceUrl(raw: string): string {
   const value = (raw || '').trim().replace(/\/+$/, '');
   if (!value) throw new Error('GPU worker has no URL configured.');
 
-  const asSlug = (owner: string, space: string) =>
-    `https://${`${owner}-${space}`.toLowerCase().replace(/[^a-z0-9-]/g, '-')}.hf.space`;
+  const asSlug = (owner: string, space: string): string => {
+    const host = `${owner}-${space}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    return `https://${host}.hf.space`;
+  };
 
   const hfPage = value.match(/^https?:\/\/huggingface\.co\/spaces\/([^/]+)\/([^/]+)/i);
   if (hfPage) return asSlug(hfPage[1], hfPage[2]);
@@ -201,7 +203,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
     if (!(err instanceof AuthzError)) {
       console.error(`Execution handler ${event} failed:`, err);
     } else {
-      console.warn(`\ud83d\udeab Denied ${event} for ${user.email}: ${message}`);
+      console.warn(`Denied ${event} for ${user.email}: ${message}`);
     }
     socket.emit('authz_error', { event, message });
   }
@@ -282,7 +284,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
             }
 
             // Prefer a genuinely idle worker, but also reclaim one that is
-            // parked at BUSY with a stale heartbeat — otherwise a single
+            // parked at BUSY with a stale heartbeat - otherwise a single
             // crashed job blocks GPU execution permanently.
             const worker = await prisma.executionWorker.findFirst({
               where: {
