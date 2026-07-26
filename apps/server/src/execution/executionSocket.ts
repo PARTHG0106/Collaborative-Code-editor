@@ -3,7 +3,6 @@ import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import * as pty from 'node-pty';
 import prisma from '../lib/prisma.js';
 import { config } from '../config/index.js';
 import {
@@ -13,8 +12,55 @@ import {
   requireWorkspaceRole,
 } from '../lib/socketAuthz.js';
 
+/**
+ * The parts of a node-pty pseudo-terminal this module actually uses.
+ *
+ * Declared locally rather than imported from node-pty so that this file still
+ * type-checks in an environment where the optional native module was not built.
+ */
+type PtyProcess = {
+  onData: (listener: (data: string) => void) => void;
+  write: (data: string) => void;
+  resize: (columns: number, rows: number) => void;
+  kill: (signal?: string) => void;
+};
+
+type PtySpawn = (
+  file: string,
+  args: string[],
+  options: {
+    name?: string;
+    cols?: number;
+    rows?: number;
+    cwd?: string;
+    env?: Record<string, string>;
+  },
+) => PtyProcess;
+
+let cachedPtySpawn: PtySpawn | null = null;
+
+/**
+ * node-pty is a native addon with no prebuilt binary for every platform, so it
+ * lives in optionalDependencies: an image without a compiler toolchain skips it
+ * instead of failing the whole install. Loading it lazily keeps that skip
+ * harmless - the module is only needed once someone actually opens a terminal,
+ * which requires ENABLE_TERMINAL plus a write role on the workspace.
+ */
+function loadPtySpawn(): PtySpawn {
+  if (cachedPtySpawn) return cachedPtySpawn;
+
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const loaded = require('node-pty') as { spawn?: PtySpawn };
+  if (typeof loaded?.spawn !== 'function') {
+    throw new Error('node-pty is installed but did not export a spawn function');
+  }
+
+  cachedPtySpawn = loaded.spawn;
+  return cachedPtySpawn;
+}
+
 const activeProcesses = new Map<string, any>();
-const ptyProcesses = new Map<string, pty.IPty>();
+const ptyProcesses = new Map<string, PtyProcess>();
 const ptyTimeouts = new Map<string, NodeJS.Timeout>();
 
 /** Languages we are willing to execute at all. Enforced server-side. */
@@ -579,6 +625,20 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
 
         if (ptyProcesses.has(socket.id)) return;
 
+        // node-pty is optional, so confirm it is actually present before doing
+        // any filesystem work for this session.
+        let spawnPty: PtySpawn;
+        try {
+          spawnPty = loadPtySpawn();
+        } catch (err) {
+          console.error('node-pty is unavailable, terminal disabled:', err);
+          socket.emit('terminal:output', {
+            data:
+              'The interactive terminal is unavailable: this server was built without the node-pty native module.\r\n',
+          });
+          return;
+        }
+
         // xterm on the client decides the real geometry; a fixed 80x30 made
         // bash wrap at the wrong column and garble the prompt.
         const cols = Math.max(20, Math.min(500, Math.floor(Number(payload.cols) || 80)));
@@ -622,7 +682,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
 
         // --noprofile --norc so no startup file can re-export a wider
         // environment or override the prompt.
-        const ptyProcess = pty.spawn('bash', ['--noprofile', '--norc'], {
+        const ptyProcess = spawnPty('bash', ['--noprofile', '--norc'], {
           name: 'xterm-256color',
           cols,
           rows,
@@ -630,7 +690,7 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
           env: buildSafeEnv(cwd),
         });
 
-        ptyProcess.onData((data) => {
+        ptyProcess.onData((data: string) => {
           socket.emit('terminal:output', { data });
         });
 
