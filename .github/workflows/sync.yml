@@ -1,7 +1,8 @@
 name: Sync to Hugging Face Hub
 on:
   push:
-    branches: [main] # Triggers the sync on every push to main
+    branches: [main]
+  workflow_dispatch: # Adds the manual "Run workflow" button
 
 jobs:
   sync:
