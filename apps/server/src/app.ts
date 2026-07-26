@@ -13,6 +13,23 @@ import chatRoutes from './routes/chat.js';
 import versionRoutes from './routes/version.js';
 
 /**
+ * Turns a CORS_ORIGINS entry into a matcher.
+ *
+ * A single "*" is allowed so generated preview domains can be covered without
+ * redeploying for every hostname, e.g. "https://my-app-*.vercel.app". The
+ * wildcard expands to [A-Za-z0-9-]+, which matches exactly one hostname label
+ * and deliberately excludes dots: without that restriction
+ * "https://*.vercel.app" would also match "https://anything.evil.com.vercel.app"
+ * style hosts, and this allowlist gates credentialed requests.
+ */
+function originPattern(entry: string): RegExp {
+  const escaped = entry
+    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '[A-Za-z0-9-]+');
+  return new RegExp(`^${escaped}$`);
+}
+
+/**
  * Creates and configures the Express application.
  * Separated from server startup for testability.
  */
@@ -33,9 +50,21 @@ export function createApp(): express.Application {
   // Explicit allowlist. Reflecting an arbitrary Origin back while sending
   // credentials lets any site issue authenticated requests on behalf of a
   // logged-in user, so the origin must be checked against config.corsOrigins.
-  const allowedOrigins = new Set(
-    config.corsOrigins.map((origin) => origin.trim()).filter(Boolean),
-  );
+  const rawOrigins = config.corsOrigins
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+  const exactOrigins = new Set(rawOrigins.filter((origin) => !origin.includes('*')));
+  const wildcardOrigins = rawOrigins
+    .filter((origin) => origin.includes('*'))
+    .map(originPattern);
+
+  const isAllowedOrigin = (origin: string): boolean =>
+    exactOrigins.has(origin) || wildcardOrigins.some((pattern) => pattern.test(origin));
+
+  // Blocked origins already reported. One misconfigured client retrying in a
+  // loop should not bury the rest of the log.
+  const reportedOrigins = new Set<string>();
 
   app.use(
     cors({
@@ -45,9 +74,22 @@ export function createApp(): express.Application {
         // requests, so they carry no CSRF risk from a reflected origin.
         if (!origin) return callback(null, true);
 
-        if (allowedOrigins.has(origin)) return callback(null, true);
+        if (isAllowedOrigin(origin)) return callback(null, true);
 
-        return callback(new Error(`Origin not allowed by CORS: ${origin}`));
+        // Passing an Error here handed it to next(), so every blocked request
+        // became an unhandled 500 with a full stack trace — while the response
+        // still lacked the CORS headers the browser needs. The client saw an
+        // opaque network failure with no body to read an error message from.
+        // Returning false attaches no CORS headers and lets the browser do the
+        // blocking, which is what the spec expects.
+        if (!reportedOrigins.has(origin)) {
+          reportedOrigins.add(origin);
+          console.warn(
+            `⚠️ CORS: blocked request from origin ${origin}. If this is one of your own deployments, add it to CORS_ORIGINS (wildcards allowed, e.g. https://my-app-*.vercel.app).`,
+          );
+        }
+
+        return callback(null, false);
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
