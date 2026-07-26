@@ -99,12 +99,28 @@ def execute_job(code: str, language: str):
             file_path = os.path.join(temp_dir, "Main.java")
             with open(file_path, "w") as f:
                 f.write(code)
-                
-            result = subprocess.run(
-                ["java", file_path],
+
+            # Compile first. `java Main.java` only works on JDK 11+ single-file
+            # source mode, and fails confusingly on older images.
+            compile_result = subprocess.run(
+                ["javac", "-d", temp_dir, file_path],
                 capture_output=True,
                 text=True,
-                timeout=58
+                timeout=20
+            )
+
+            if compile_result.returncode != 0:
+                return {
+                    "stdout": compile_result.stdout,
+                    "stderr": compile_result.stderr,
+                    "exitCode": compile_result.returncode
+                }
+
+            result = subprocess.run(
+                ["java", "-cp", temp_dir, "Main"],
+                capture_output=True,
+                text=True,
+                timeout=38
             )
             return {
                 "stdout": result.stdout,
@@ -134,4 +150,7 @@ with gr.Blocks() as app:
     
     btn.click(execute_job, inputs=[code_input, lang_input], outputs=output, api_name="execute")
 
-app.launch(server_name="0.0.0.0", server_port=7860, share=True)
+# No share tunnel: the Space is already reachable on its own host, and the
+# backend calls that host directly. A tunnel would be a second, unauthenticated
+# way to reach a service that compiles and runs arbitrary code.
+app.launch(server_name="0.0.0.0", server_port=7860)
