@@ -13,4 +13,7 @@ WORKDIR /app
 COPY --from=builder /app ./
 EXPOSE 7860
 ENV PORT=7860
-CMD npm run db:push --workspace=apps/server -- --accept-data-loss && node apps/server/dist/index.js
+# migrate deploy applies the committed migrations and nothing else. The previous
+# `db push --accept-data-loss` reshaped the live database on every boot and was
+# permitted to drop data to do it.
+CMD npm run db:deploy --workspace=apps/server && node apps/server/dist/index.js

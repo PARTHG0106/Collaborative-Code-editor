@@ -11,6 +11,12 @@ interface AuthContextType {
   user: User | null;
   accessToken: string | null;
   loading: boolean;
+  /**
+   * True once the first request has been outstanding long enough that the API
+   * is almost certainly cold-starting. Screens can use this to explain the
+   * wait instead of showing an unexplained spinner.
+   */
+  serverWaking: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
@@ -26,8 +32,25 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // Create custom Axios client for authenticated API requests
 const VITE_API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api';
 
+/** How long a cold start is allowed to look silent before we explain it. */
+const WAKING_NOTICE_DELAY_MS = 3000;
+
+/**
+ * withCredentials is required: the refresh token lives only in an httpOnly
+ * cookie now, so it has to be attached automatically. Nothing reads it in JS.
+ */
 export const apiClient = axios.create({
   baseURL: VITE_API_URL,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+/** Same credential behaviour for the bare calls made outside apiClient. */
+const authAxios = axios.create({
+  baseURL: VITE_API_URL,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -37,6 +60,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [serverWaking, setServerWaking] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
@@ -65,7 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       async (err) => {
         const originalRequest = err.config;
         const url = originalRequest?.url || '';
-        const isPublicAuthEndpoint = 
+        const isPublicAuthEndpoint =
           url.includes('/auth/login') ||
           url.includes('/auth/register') ||
           url.includes('/auth/verify') ||
@@ -77,20 +101,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           originalRequest._retry = true;
 
           try {
-            const localRefreshToken = localStorage.getItem('refreshToken');
-            // Attempt to refresh the access token using the HTTP-only refresh cookie or local storage token
-            const response = await axios.post(
-              `${VITE_API_URL}/auth/refresh`,
-              { refreshToken: localRefreshToken }
-            );
+            // The refresh token rides along as an httpOnly cookie; there is
+            // nothing to send in the body and nothing to store afterwards.
+            const response = await authAxios.post('/auth/refresh');
 
             if (response.data && response.data.success) {
               const newAccessToken = response.data.data.accessToken;
-              const newRefreshToken = response.data.data.refreshToken;
               setAccessToken(newAccessToken);
-              if (newRefreshToken) {
-                localStorage.setItem('refreshToken', newRefreshToken);
-              }
 
               // Retry the original request with the new access token
               originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
@@ -98,7 +115,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           } catch (refreshErr) {
             // Refresh token is expired or invalid -> log out
-            localStorage.removeItem('refreshToken');
             setUser(null);
             setAccessToken(null);
             return Promise.reject(refreshErr);
@@ -113,31 +129,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Initial session restoration: check if user is already logged in
+  // Initial session restoration: check if user is already logged in.
+  // The refresh cookie is invisible to JavaScript, so unlike the old
+  // localStorage check there is no way to know in advance whether a session
+  // exists. Ask the server once and accept an unauthenticated answer.
   const restoreSession = useCallback(async () => {
-    const localRefreshToken = localStorage.getItem('refreshToken');
-    if (!localRefreshToken) {
-      setLoading(false);
-      return;
-    }
+    const wakingTimer = setTimeout(() => setServerWaking(true), WAKING_NOTICE_DELAY_MS);
 
     try {
-      // Try to get a fresh access token using the HTTP-only cookie or local storage token
-      const refreshRes = await axios.post(
-        `${VITE_API_URL}/auth/refresh`,
-        { refreshToken: localRefreshToken }
-      );
+      const refreshRes = await authAxios.post('/auth/refresh');
 
       if (refreshRes.data && refreshRes.data.success) {
         const token = refreshRes.data.data.accessToken;
-        const newRefreshToken = refreshRes.data.data.refreshToken;
         setAccessToken(token);
-        if (newRefreshToken) {
-          localStorage.setItem('refreshToken', newRefreshToken);
-        }
 
         // Fetch user profile using the new access token
-        const profileRes = await axios.get(`${VITE_API_URL}/auth/me`, {
+        const profileRes = await authAxios.get('/auth/me', {
           headers: { Authorization: `Bearer ${token}` },
         });
 
@@ -147,8 +154,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch {
       // No active session or refresh expired: fail silently, user starts unauthenticated
-      localStorage.removeItem('refreshToken');
     } finally {
+      clearTimeout(wakingTimer);
+      setServerWaking(false);
       setLoading(false);
     }
   }, []);
@@ -160,14 +168,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password: string) => {
     setError(null);
     setLoading(true);
+    const wakingTimer = setTimeout(() => setServerWaking(true), WAKING_NOTICE_DELAY_MS);
     try {
       const response = await apiClient.post('/auth/login', { email, password });
       if (response.data && response.data.success) {
-        const { accessToken: token, refreshToken: newRefreshToken, user: userData } = response.data.data;
+        const { accessToken: token, user: userData } = response.data.data;
         setAccessToken(token);
-        if (newRefreshToken) {
-          localStorage.setItem('refreshToken', newRefreshToken);
-        }
         setUser(userData);
       }
     } catch (err: any) {
@@ -181,6 +187,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       throw new Error(errMsg);
     } finally {
+      clearTimeout(wakingTimer);
+      setServerWaking(false);
       setLoading(false);
     }
   };
@@ -188,6 +196,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const register = async (email: string, password: string, name: string) => {
     setError(null);
     setLoading(true);
+    const wakingTimer = setTimeout(() => setServerWaking(true), WAKING_NOTICE_DELAY_MS);
     try {
       await apiClient.post('/auth/register', { email, password, name });
     } catch (err: any) {
@@ -195,6 +204,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setError(errMsg);
       throw new Error(errMsg);
     } finally {
+      clearTimeout(wakingTimer);
+      setServerWaking(false);
       setLoading(false);
     }
   };
@@ -205,11 +216,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const response = await apiClient.post('/auth/verify', { email, code });
       if (response.data && response.data.success) {
-        const { accessToken: token, refreshToken: newRefreshToken, user: userData } = response.data.data;
+        const { accessToken: token, user: userData } = response.data.data;
         setAccessToken(token);
-        if (newRefreshToken) {
-          localStorage.setItem('refreshToken', newRefreshToken);
-        }
         setUser(userData);
       }
     } catch (err: any) {
@@ -238,13 +246,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     setLoading(true);
     try {
-      const localRefreshToken = localStorage.getItem('refreshToken');
-      // Best-effort backend logout (clears cookie & DB token)
-      await apiClient.post('/auth/logout', { refreshToken: localRefreshToken });
+      // The cookie identifies the session; the server revokes it and clears it.
+      await apiClient.post('/auth/logout');
     } catch {
       // Suppress backend logout errors
     } finally {
-      localStorage.removeItem('refreshToken');
       setAccessToken(null);
       setUser(null);
       setLoading(false);
@@ -257,6 +263,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         accessToken,
         loading,
+        serverWaking,
         error,
         login,
         register,
