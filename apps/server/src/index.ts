@@ -6,6 +6,32 @@ import prisma from './lib/prisma.js';
 import { initSocketServer } from './socket.js';
 
 /**
+ * Process-level error guards.
+ *
+ * Node terminates the process on an unhandled promise rejection, and Hugging
+ * Face Docker Spaces do not restart a container that exits - the Space simply
+ * enters the error state. Without these listeners a single dropped database
+ * connection or one rejecting socket handler is a full outage with no crash
+ * trace in the log, because the try/catch inside main() stops applying the
+ * moment startup finishes.
+ *
+ * These deliberately do not exit. In this service the realistic causes are a
+ * single bad request or a transient network failure, so staying up and serving
+ * every other user is better than a hard outage requiring a manual restart.
+ * Anything logged here is a real defect and should be fixed at the source -
+ * repeated entries are the signal.
+ */
+function installProcessGuards(): void {
+  process.on('unhandledRejection', (reason: unknown) => {
+    console.error('⚠️  Unhandled promise rejection - server kept alive:', reason);
+  });
+
+  process.on('uncaughtException', (err: Error) => {
+    console.error('⚠️  Uncaught exception - server kept alive:', err);
+  });
+}
+
+/**
  * Server entry point with detailed checkpoint logging.
  */
 async function main(): Promise<void> {
@@ -96,6 +122,12 @@ async function main(): Promise<void> {
     initSocketServer(server);
     console.info('✅ [CHECKPOINT 7] Socket.IO initialized!');
 
+    // An HTTP server with no 'error' listener throws, which would take the
+    // process down on something as ordinary as a port already in use.
+    server.on('error', (err: Error) => {
+      console.error('❌ HTTP server error:', err);
+    });
+
     // ──────────────────────────────────────────
     // CHECKPOINT 8: Start listening
     // ──────────────────────────────────────────
@@ -137,4 +169,5 @@ async function main(): Promise<void> {
   }
 }
 
+installProcessGuards();
 main();
