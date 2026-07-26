@@ -32,6 +32,9 @@ interface UseWorkspaceSocketReturn {
   handleChatInputChange: (value: string) => void;
   chatInput: string;
   setChatInput: React.Dispatch<React.SetStateAction<string>>;
+  /** Most recent authorization denial from the server, if any. */
+  permissionError: string | null;
+  clearPermissionError: () => void;
 }
 
 export function useWorkspaceSocket(workspaceId: string): UseWorkspaceSocketReturn {
@@ -42,9 +45,12 @@ export function useWorkspaceSocket(workspaceId: string): UseWorkspaceSocketRetur
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [chatInput, setChatInput] = useState('');
+  const [permissionError, setPermissionError] = useState<string | null>(null);
   const isTypingRef = useRef(false);
   const typingTimeoutRef = useRef<any>(null);
   const rightPanelOpenRef = useRef(false);
+
+  const clearPermissionError = useCallback(() => setPermissionError(null), []);
 
   // Fetch chat history
   const fetchChatHistory = useCallback(async () => {
@@ -72,12 +78,12 @@ export function useWorkspaceSocket(workspaceId: string): UseWorkspaceSocketRetur
     setSocket(newSocket);
 
     if (newSocket.connected) {
-      console.info('🔌 Already Connected to Socket.IO Server');
+      console.info('\ud83d\udd0c Already Connected to Socket.IO Server');
       newSocket.emit('join_workspace', { workspaceId });
     }
 
     newSocket.on('connect', () => {
-      console.info('🔌 Connected to Socket.IO Server');
+      console.info('\ud83d\udd0c Connected to Socket.IO Server');
       newSocket.emit('join_workspace', { workspaceId });
     });
 
@@ -86,7 +92,7 @@ export function useWorkspaceSocket(workspaceId: string): UseWorkspaceSocketRetur
     });
 
     newSocket.on('disconnect', (reason) => {
-      console.info('🔌 Disconnected from Socket.IO Server:', reason);
+      console.info('\ud83d\udd0c Disconnected from Socket.IO Server:', reason);
     });
 
     newSocket.on('workspace_users', (users: UserPayload[]) => {
@@ -108,6 +114,14 @@ export function useWorkspaceSocket(workspaceId: string): UseWorkspaceSocketRetur
         }
         return prev.filter(u => u.userId !== userId);
       });
+    });
+
+    // The server now authorizes every socket event against workspace
+    // membership and replies with authz_error when it refuses. Without this
+    // listener a denial is completely silent and the UI just looks broken.
+    newSocket.on('authz_error', ({ event, message }: { event: string; message: string }) => {
+      console.warn(`Socket event ${event} was denied: ${message}`);
+      setPermissionError(message || 'You do not have permission to do that.');
     });
 
     newSocket.on('error', (errMsg: string) => {
@@ -159,6 +173,8 @@ export function useWorkspaceSocket(workspaceId: string): UseWorkspaceSocketRetur
     handleChatInputChange,
     chatInput,
     setChatInput,
+    permissionError,
+    clearPermissionError,
   };
 }
 
