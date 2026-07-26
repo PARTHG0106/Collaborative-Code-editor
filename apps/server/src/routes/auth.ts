@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import rateLimit from 'express-rate-limit';
+import { randomInt } from 'crypto';
 import { z } from 'zod';
 import prisma from '../lib/prisma.js';
 import { config } from '../config/index.js';
@@ -8,6 +10,88 @@ import { requireAuth, AuthRequest, TokenPayload } from '../middleware/auth.js';
 import { sendEmail } from '../utils/mailer.js';
 
 const router = Router();
+
+const limiterResponse = (message: string) => ({
+  success: false,
+  error: { message, statusCode: 429 },
+});
+
+/**
+ * Credential stuffing protection. Successful logins are not counted, so a
+ * legitimate user who keeps signing in is never locked out by their own
+ * traffic; only failures consume the budget.
+ */
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  skipSuccessfulRequests: true,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: limiterResponse('Too many sign-in attempts. Please try again in 15 minutes.'),
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: limiterResponse('Too many accounts created from this network. Please try again later.'),
+});
+
+/** Anything that causes us to send mail needs a tighter budget than the rest. */
+const emailLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: 5,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: limiterResponse('Too many verification emails requested. Please try again in an hour.'),
+});
+
+const verifyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 20,
+  standardHeaders: 'draft-7',
+  legacyHeaders: false,
+  message: limiterResponse('Too many verification attempts. Please try again in 15 minutes.'),
+});
+
+const MAX_VERIFY_ATTEMPTS = 5;
+const VERIFY_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * Per-account wrong-code counter, layered under the IP limiter above so that a
+ * distributed attacker cannot simply rotate addresses to brute force a single
+ * account's six digit code.
+ */
+const verifyAttempts = new Map<string, { count: number; firstAt: number }>();
+
+function tooManyVerifyAttempts(email: string): boolean {
+  const entry = verifyAttempts.get(email);
+  if (!entry) return false;
+  if (Date.now() - entry.firstAt > VERIFY_WINDOW_MS) {
+    verifyAttempts.delete(email);
+    return false;
+  }
+  return entry.count >= MAX_VERIFY_ATTEMPTS;
+}
+
+function recordVerifyFailure(email: string): void {
+  const entry = verifyAttempts.get(email);
+  if (!entry || Date.now() - entry.firstAt > VERIFY_WINDOW_MS) {
+    verifyAttempts.set(email, { count: 1, firstAt: Date.now() });
+    return;
+  }
+  entry.count += 1;
+}
+
+/**
+ * Six digit verification code from a cryptographically secure source.
+ * Math.random() is not suitable here: its output is predictable enough that a
+ * code can be guessed rather than intercepted.
+ */
+function generateVerificationCode(): string {
+  return String(randomInt(100000, 1000000));
+}
 
 // Validation Schemas
 const registerSchema = z.object({
@@ -53,7 +137,13 @@ function generateRefreshToken(userId: string): string {
   });
 }
 
-// Helper: Set Refresh Token Cookie
+/**
+ * Helper: Set Refresh Token Cookie
+ *
+ * This cookie is the only place the refresh token is handed to a browser. It is
+ * deliberately not echoed in any response body: a body copy is what allowed the
+ * frontend to mirror it into localStorage, where any XSS could read it.
+ */
 function setRefreshTokenCookie(res: Response, token: string) {
   // Parse expiry duration to milliseconds (defaults to 7 days if parsing fails)
   let maxAge = 7 * 24 * 60 * 60 * 1000;
@@ -78,7 +168,7 @@ function setRefreshTokenCookie(res: Response, token: string) {
  * POST /api/auth/register
  * Registers a new user.
  */
-router.post('/register', async (req: Request, res: Response) => {
+router.post('/register', registerLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password, name } = registerSchema.parse(req.body);
 
@@ -99,7 +189,7 @@ router.post('/register', async (req: Request, res: Response) => {
 
       // Existing unverified user: update their details, generate a new code, and send it
       const passwordHash = await bcrypt.hash(password, 12);
-      const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
+      const verificationToken = generateVerificationCode();
       const verificationExpires = new Date(Date.now() + 3600000); // 1 hour
 
       const updatedUser = await prisma.user.update({
@@ -138,7 +228,7 @@ router.post('/register', async (req: Request, res: Response) => {
     const passwordHash = await bcrypt.hash(password, 12);
 
     // Generate 6-digit verification code
-    const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
+    const verificationToken = generateVerificationCode();
     const verificationExpires = new Date(Date.now() + 3600000); // 1 hour
 
     const user = await prisma.user.create({
@@ -198,9 +288,10 @@ router.post('/register', async (req: Request, res: Response) => {
 
 /**
  * POST /api/auth/login
- * Authenticates user and returns tokens.
+ * Authenticates user and returns an access token. The refresh token is set as
+ * an httpOnly cookie only.
  */
-router.post('/login', async (req: Request, res: Response) => {
+router.post('/login', loginLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password } = loginSchema.parse(req.body);
 
@@ -267,7 +358,6 @@ router.post('/login', async (req: Request, res: Response) => {
       success: true,
       data: {
         accessToken,
-        refreshToken,
         user: {
           id: user.id,
           email: user.email,
@@ -299,11 +389,12 @@ router.post('/login', async (req: Request, res: Response) => {
 
 /**
  * POST /api/auth/refresh
- * Uses refresh token to issue new access & refresh tokens (rotation).
+ * Uses the refresh token cookie to issue a new access token and rotate the
+ * refresh token. The rotated token is returned as a cookie, never in the body.
  */
 router.post('/refresh', async (req: Request, res: Response) => {
   try {
-    const { refreshToken: bodyToken } = refreshSchema.parse(req.body);
+    const { refreshToken: bodyToken } = refreshSchema.parse(req.body ?? {});
     const token = req.cookies?.refreshToken || bodyToken;
 
     if (!token) {
@@ -382,7 +473,6 @@ router.post('/refresh', async (req: Request, res: Response) => {
       success: true,
       data: {
         accessToken,
-        refreshToken: newRefreshToken,
       },
     });
   } catch (error) {
@@ -413,7 +503,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
  */
 router.post('/logout', async (req: Request, res: Response) => {
   try {
-    const token = req.cookies?.refreshToken || req.body.refreshToken;
+    const token = req.cookies?.refreshToken || req.body?.refreshToken;
 
     if (token) {
       // Delete token from database (revoke it)
@@ -494,9 +584,19 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response) => {
  * POST /api/auth/verify
  * Verifies email with 6-digit code and logs user in.
  */
-router.post('/verify', async (req: Request, res: Response) => {
+router.post('/verify', verifyLimiter, async (req: Request, res: Response) => {
   try {
     const { email, code } = verifySchema.parse(req.body);
+
+    if (tooManyVerifyAttempts(email)) {
+      return res.status(429).json({
+        success: false,
+        error: {
+          message: 'Too many incorrect codes. Please request a new code and try again shortly.',
+          statusCode: 429,
+        },
+      });
+    }
 
     const user = await prisma.user.findUnique({
       where: { email },
@@ -523,6 +623,7 @@ router.post('/verify', async (req: Request, res: Response) => {
     }
 
     if (user.verificationToken !== code) {
+      recordVerifyFailure(email);
       return res.status(400).json({
         success: false,
         error: {
@@ -541,6 +642,9 @@ router.post('/verify', async (req: Request, res: Response) => {
         },
       });
     }
+
+    // Correct code: clear the failure counter for this address.
+    verifyAttempts.delete(email);
 
     // Mark as verified
     const updatedUser = await prisma.user.update({
@@ -584,7 +688,6 @@ router.post('/verify', async (req: Request, res: Response) => {
       success: true,
       data: {
         accessToken,
-        refreshToken,
         user: updatedUser,
       },
     });
@@ -614,7 +717,7 @@ router.post('/verify', async (req: Request, res: Response) => {
  * POST /api/auth/resend-verification
  * Generates and resends a new verification code.
  */
-router.post('/resend-verification', async (req: Request, res: Response) => {
+router.post('/resend-verification', emailLimiter, async (req: Request, res: Response) => {
   try {
     const { email } = resendSchema.parse(req.body);
 
@@ -643,7 +746,7 @@ router.post('/resend-verification', async (req: Request, res: Response) => {
     }
 
     // Generate new 6-digit code
-    const verificationToken = Math.floor(100000 + Math.random() * 900000).toString();
+    const verificationToken = generateVerificationCode();
     const verificationExpires = new Date(Date.now() + 3600000); // 1 hour
 
     await prisma.user.update({
@@ -653,6 +756,9 @@ router.post('/resend-verification', async (req: Request, res: Response) => {
         verificationExpires,
       },
     });
+
+    // A fresh code invalidates any accumulated wrong guesses.
+    verifyAttempts.delete(email);
 
     // Send code
     sendEmail({
