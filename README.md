@@ -1,12 +1,3 @@
----
-title: syncscript-api
-emoji: 🚀
-colorFrom: indigo
-colorTo: purple
-sdk: docker
-app_port: 7860
-pinned: false
----
 
 # SyncScript - Collaborative Real-Time Code Editor
 
