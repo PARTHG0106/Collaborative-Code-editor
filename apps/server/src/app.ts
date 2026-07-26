@@ -13,6 +13,12 @@ import fileRoutes from './routes/file.js';
 import chatRoutes from './routes/chat.js';
 import versionRoutes from './routes/version.js';
 
+const ALLOWED_METHODS = 'GET, POST, PUT, PATCH, DELETE, OPTIONS';
+const DEFAULT_ALLOWED_HEADERS = 'Content-Type, Authorization';
+
+/** How long a browser may cache a preflight result, in seconds. */
+const PREFLIGHT_MAX_AGE = '600';
+
 /**
  * Creates and configures the Express application.
  * Separated from server startup for testability.
@@ -34,16 +40,13 @@ export function createApp(): express.Application {
   // Explicit allowlist. Reflecting an arbitrary Origin back while sending
   // credentials lets any site issue authenticated requests on behalf of a
   // logged-in user, so the origin is checked against config.corsOrigins.
-  // Comparison happens on normalized values because an invisible character or a
-  // trailing slash in the configured value is otherwise indistinguishable from
-  // a correctly configured server that rejects your own frontend.
   for (const warning of originAllowlist.warnings) {
     console.warn(`\u26a0\ufe0f CORS_ORIGINS: ${warning}`);
   }
 
   if (originAllowlist.entries.length === 0) {
     console.warn(
-      '\u26a0\ufe0f CORS_ORIGINS produced an empty allowlist. Every cross-origin browser request will be refused.',
+      '\u26a0\ufe0f CORS_ORIGINS produced an empty allowlist. Every cross-origin browser request will be refused. The value must be a comma-separated list of origins such as https://example.com \u2014 not a URL with a path or query string.',
     );
   }
 
@@ -61,32 +64,70 @@ export function createApp(): express.Application {
     );
   };
 
-  // A preflight from a disallowed origin must not be handed to next(): the cors
-  // package attaches no headers in that case, so the request would land on the
-  // 404 handler and the browser would report an empty
-  // Access-Control-Allow-Credentials header - true, but useless for debugging.
-  // Answering here makes the refusal explicit and greppable.
-  app.options('*', (req, res, next) => {
-    const origin = req.headers.origin;
-    if (!origin || originAllowlist.isAllowed(origin)) return next();
+  /**
+   * Preflight handling, done here rather than delegated to the cors package.
+   *
+   * A browser will not send a POST with a JSON body until an OPTIONS request
+   * comes back carrying Access-Control-Allow-Credentials: true. Production
+   * showed preflights arriving with that header empty while ordinary responses
+   * from the same origin were fine, so the headers must not depend on the
+   * library's internal control flow: in cors, an origin callback that yields
+   * false results in a bare next() with no headers at all, and the request then
+   * lands on the 404 handler.
+   *
+   * Requests without an Origin header are not browser cross-site requests and
+   * are passed through untouched.
+   */
+  app.use((req, res, next) => {
+    if (req.method !== 'OPTIONS') return next();
 
-    reportBlockedOrigin(origin);
-    res.status(403).json({
-      success: false,
-      error: {
-        message: `Origin ${origin} is not allowed by this server's CORS policy.`,
-        code: 'ORIGIN_NOT_ALLOWED',
-        statusCode: 403,
-      },
-    });
+    const origin = req.headers.origin;
+
+    // Logged unconditionally: if these lines never appear while a browser
+    // reports a failed preflight, the OPTIONS request is being answered
+    // upstream and never reaches this process.
+    console.info(
+      `\u2708\ufe0f CORS preflight ${req.originalUrl} origin=${origin ?? 'none'} requestHeaders=${
+        req.headers['access-control-request-headers'] ?? 'none'
+      }`,
+    );
+
+    if (!origin) return next();
+
+    if (!originAllowlist.isAllowed(origin)) {
+      reportBlockedOrigin(origin);
+      res.status(403).json({
+        success: false,
+        error: {
+          message: `Origin ${origin} is not allowed by this server's CORS policy.`,
+          code: 'ORIGIN_NOT_ALLOWED',
+          statusCode: 403,
+        },
+      });
+      return;
+    }
+
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', ALLOWED_METHODS);
+    res.setHeader(
+      'Access-Control-Allow-Headers',
+      (req.headers['access-control-request-headers'] as string | undefined) ??
+        DEFAULT_ALLOWED_HEADERS,
+    );
+    res.setHeader('Access-Control-Max-Age', PREFLIGHT_MAX_AGE);
+    res.setHeader('Vary', 'Origin, Access-Control-Request-Headers');
+    res.status(204).end();
   });
 
+  // Actual (non-preflight) cross-origin responses still go through cors, which
+  // handles the Allow-Origin and Allow-Credentials headers correctly for them.
   app.use(
     cors({
       origin: (origin, callback) => {
         // No Origin header: same-origin navigations, server-to-server calls,
-        // health checks and CLI tools. These are not browser cross-site
-        // requests, so they carry no CSRF risk from a reflected origin.
+        // health checks and CLI tools. These carry no CSRF risk from a
+        // reflected origin.
         if (!origin) return callback(null, true);
 
         if (originAllowlist.isAllowed(origin)) return callback(null, true);
