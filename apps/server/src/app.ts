@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
 import { config } from './config/index.js';
+import { originAllowlist } from './lib/corsOrigins.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import healthRoutes from './routes/health.js';
 import authRoutes from './routes/auth.js';
@@ -11,23 +12,6 @@ import workspaceRoutes from './routes/workspace.js';
 import fileRoutes from './routes/file.js';
 import chatRoutes from './routes/chat.js';
 import versionRoutes from './routes/version.js';
-
-/**
- * Turns a CORS_ORIGINS entry into a matcher.
- *
- * A single "*" is allowed so generated preview domains can be covered without
- * redeploying for every hostname, e.g. "https://my-app-*.vercel.app". The
- * wildcard expands to [A-Za-z0-9-]+, which matches exactly one hostname label
- * and deliberately excludes dots: without that restriction
- * "https://*.vercel.app" would also match "https://anything.evil.com.vercel.app"
- * style hosts, and this allowlist gates credentialed requests.
- */
-function originPattern(entry: string): RegExp {
-  const escaped = entry
-    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*/g, '[A-Za-z0-9-]+');
-  return new RegExp(`^${escaped}$`);
-}
 
 /**
  * Creates and configures the Express application.
@@ -49,22 +33,53 @@ export function createApp(): express.Application {
 
   // Explicit allowlist. Reflecting an arbitrary Origin back while sending
   // credentials lets any site issue authenticated requests on behalf of a
-  // logged-in user, so the origin must be checked against config.corsOrigins.
-  const rawOrigins = config.corsOrigins
-    .map((origin) => origin.trim())
-    .filter(Boolean);
+  // logged-in user, so the origin is checked against config.corsOrigins.
+  // Comparison happens on normalized values because an invisible character or a
+  // trailing slash in the configured value is otherwise indistinguishable from
+  // a correctly configured server that rejects your own frontend.
+  for (const warning of originAllowlist.warnings) {
+    console.warn(`\u26a0\ufe0f CORS_ORIGINS: ${warning}`);
+  }
 
-  const exactOrigins = new Set(rawOrigins.filter((origin) => !origin.includes('*')));
-  const wildcardOrigins = rawOrigins
-    .filter((origin) => origin.includes('*'))
-    .map(originPattern);
+  if (originAllowlist.entries.length === 0) {
+    console.warn(
+      '\u26a0\ufe0f CORS_ORIGINS produced an empty allowlist. Every cross-origin browser request will be refused.',
+    );
+  }
 
-  const isAllowedOrigin = (origin: string): boolean =>
-    exactOrigins.has(origin) || wildcardOrigins.some((pattern) => pattern.test(origin));
-
-  // Blocked origins already reported. One misconfigured client retrying in a
-  // loop should not bury the rest of the log.
+  // Origins already reported, so one misconfigured client retrying in a loop
+  // cannot bury the rest of the log.
   const reportedOrigins = new Set<string>();
+
+  const reportBlockedOrigin = (origin: string): void => {
+    if (reportedOrigins.has(origin)) return;
+    reportedOrigins.add(origin);
+    console.warn(
+      `\u26a0\ufe0f CORS: refused origin ${JSON.stringify(origin)}. Allowlist: ${JSON.stringify(
+        originAllowlist.entries,
+      )}. Add it to CORS_ORIGINS if it is one of your own deployments (a single * wildcard is supported per entry).`,
+    );
+  };
+
+  // A preflight from a disallowed origin must not be handed to next(): the cors
+  // package attaches no headers in that case, so the request would land on the
+  // 404 handler and the browser would report an empty
+  // Access-Control-Allow-Credentials header - true, but useless for debugging.
+  // Answering here makes the refusal explicit and greppable.
+  app.options('*', (req, res, next) => {
+    const origin = req.headers.origin;
+    if (!origin || originAllowlist.isAllowed(origin)) return next();
+
+    reportBlockedOrigin(origin);
+    res.status(403).json({
+      success: false,
+      error: {
+        message: `Origin ${origin} is not allowed by this server's CORS policy.`,
+        code: 'ORIGIN_NOT_ALLOWED',
+        statusCode: 403,
+      },
+    });
+  });
 
   app.use(
     cors({
@@ -74,21 +89,13 @@ export function createApp(): express.Application {
         // requests, so they carry no CSRF risk from a reflected origin.
         if (!origin) return callback(null, true);
 
-        if (isAllowedOrigin(origin)) return callback(null, true);
+        if (originAllowlist.isAllowed(origin)) return callback(null, true);
 
-        // Passing an Error here handed it to next(), so every blocked request
-        // became an unhandled 500 with a full stack trace — while the response
-        // still lacked the CORS headers the browser needs. The client saw an
-        // opaque network failure with no body to read an error message from.
-        // Returning false attaches no CORS headers and lets the browser do the
-        // blocking, which is what the spec expects.
-        if (!reportedOrigins.has(origin)) {
-          reportedOrigins.add(origin);
-          console.warn(
-            `⚠️ CORS: blocked request from origin ${origin}. If this is one of your own deployments, add it to CORS_ORIGINS (wildcards allowed, e.g. https://my-app-*.vercel.app).`,
-          );
-        }
+        reportBlockedOrigin(origin);
 
+        // Returning false omits the CORS headers and lets the browser block the
+        // response. Passing an Error instead would surface as an unhandled 500
+        // with a stack trace per attempt.
         return callback(null, false);
       },
       credentials: true,
