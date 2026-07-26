@@ -40,6 +40,31 @@ type PtySpawn = (
 let cachedPtySpawn: PtySpawn | null = null;
 
 /**
+ * Held in a constant so the specifier is never a literal argument to require().
+ * Bundlers resolve `require('node-pty')` at build time even inside a function
+ * that is never called, which fails the build wherever this optional native
+ * module was skipped.
+ */
+const PTY_MODULE = 'node-pty';
+
+/**
+ * A CommonJS require looked up at runtime, deliberately opaque to bundlers.
+ *
+ * Returns null rather than throwing when there is no require in scope, which is
+ * the case if this file is ever bundled as ESM.
+ */
+function getRuntimeRequire(): ((id: string) => unknown) | null {
+  try {
+    // eslint-disable-next-line no-eval
+    if ((eval('typeof require') as string) !== 'function') return null;
+    // eslint-disable-next-line no-eval
+    return eval('require') as (id: string) => unknown;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * node-pty is a native addon with no prebuilt binary for every platform, so it
  * lives in optionalDependencies: an image without a compiler toolchain skips it
  * instead of failing the whole install. Loading it lazily keeps that skip
@@ -49,8 +74,12 @@ let cachedPtySpawn: PtySpawn | null = null;
 function loadPtySpawn(): PtySpawn {
   if (cachedPtySpawn) return cachedPtySpawn;
 
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const loaded = require('node-pty') as { spawn?: PtySpawn };
+  const requireAtRuntime = getRuntimeRequire();
+  if (!requireAtRuntime) {
+    throw new Error('No CommonJS require is available to load the terminal backend');
+  }
+
+  const loaded = requireAtRuntime(PTY_MODULE) as { spawn?: PtySpawn };
   if (typeof loaded?.spawn !== 'function') {
     throw new Error('node-pty is installed but did not export a spawn function');
   }
