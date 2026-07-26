@@ -4,7 +4,7 @@ emoji: 🚀
 colorFrom: blue
 colorTo: indigo
 sdk: docker
-app_port: 3000
+app_port: 7860
 ---
 
 # SyncScript - Collaborative Real-Time Code Editor
@@ -70,15 +70,19 @@ Collaborative-Code-editor/
 Configure the backend server environment variables by creating `.env` at the root of the project:
 
 ```env
-PORT=4000
+PORT=3000
 NODE_ENV=development
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/syncscript?schema=public"
 
-# JWT Secrets
+# JWT Secrets. Both are required and must be at least 32 characters.
+# Generate with: openssl rand -base64 48
 JWT_ACCESS_SECRET=your_super_secret_access_token_key_here
 JWT_REFRESH_SECRET=your_super_secret_refresh_token_key_here
 JWT_ACCESS_EXPIRY=15m
 JWT_REFRESH_EXPIRY=7d
+
+# Comma-separated allowlist of browser origins. Required in production.
+CORS_ORIGINS=http://localhost:5173
 ```
 
 ### 3. Install Dependencies
@@ -104,7 +108,25 @@ npm run dev
 ```
 
 - **Frontend client**: http://localhost:5173
-- **Backend API**: http://localhost:4000
+- **Backend API**: http://localhost:3000
+
+---
+
+## 🚀 Deployment Notes
+
+The API is deployed as a Docker Space on Hugging Face. Two values must agree or the
+Space will start successfully and still be killed as unhealthy, because Hugging Face
+routes all traffic to `app_port`:
+
+- `app_port` in this file's front matter
+- `ENV PORT` / `EXPOSE` in the `Dockerfile`
+
+Both are currently `7860`.
+
+Required Space configuration:
+
+- **Secrets**: `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `HF_TOKEN`, `SMTP_PASS`
+- **Variables**: `CORS_ORIGINS`, and `ENABLE_TERMINAL` only if the interactive terminal is wanted
 
 ---
 
@@ -122,7 +144,5 @@ To build all projects:
 ```bash
 npm run build
 ```
-
-<!-- Trigger deployment: updated db connection configs -->
 
 Project Live at: https://parthg0106.dev
