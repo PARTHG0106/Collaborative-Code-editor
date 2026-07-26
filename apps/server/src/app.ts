@@ -19,16 +19,35 @@ import versionRoutes from './routes/version.js';
 export function createApp(): express.Application {
   const app = express();
 
+  // Behind the Hugging Face / Vercel proxy, so req.ip must come from
+  // X-Forwarded-For. express-rate-limit keys on req.ip, and without this every
+  // request would share the proxy's address and one client could exhaust the
+  // limit for everyone.
+  app.set('trust proxy', 1);
+
   // ---------------------
   // Security Middleware
   // ---------------------
   app.use(helmet());
+
+  // Explicit allowlist. Reflecting an arbitrary Origin back while sending
+  // credentials lets any site issue authenticated requests on behalf of a
+  // logged-in user, so the origin must be checked against config.corsOrigins.
+  const allowedOrigins = new Set(
+    config.corsOrigins.map((origin) => origin.trim()).filter(Boolean),
+  );
+
   app.use(
     cors({
       origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps, server-to-server, or local tools)
+        // No Origin header: same-origin navigations, server-to-server calls,
+        // health checks and CLI tools. These are not browser cross-site
+        // requests, so they carry no CSRF risk from a reflected origin.
         if (!origin) return callback(null, true);
-        callback(null, true);
+
+        if (allowedOrigins.has(origin)) return callback(null, true);
+
+        return callback(new Error(`Origin not allowed by CORS: ${origin}`));
       },
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
