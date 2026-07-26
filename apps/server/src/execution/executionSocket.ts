@@ -47,6 +47,10 @@ const STALE_MS = 2 * 60 * 1000;
 /** Hard cap on how long an interactive shell may stay alive. */
 const PTY_MAX_LIFETIME_MS = 15 * 60 * 1000;
 
+/** Scheme and suffix for a Hugging Face Space direct API host. */
+const SCHEME = 'https://';
+const SPACE_HOST_SUFFIX = '.hf.space';
+
 /**
  * The only environment variables an interactive shell inherits.
  *
@@ -72,20 +76,20 @@ function buildSafeEnv(cwd: string): Record<string, string> {
  * Accepts the URL shapes people actually store for a Space and returns an
  * origin we can call.
  *
- *   "owner/space"                        -> https://owner-space.hf.space
- *   "https://huggingface.co/spaces/o/s"  -> https://o-s.hf.space
- *   "https://owner-space.hf.space/"      -> same, trailing slash removed
+ *   "owner/space"                      -> the direct owner-space API host
+ *   a huggingface.co/spaces/o/s page    -> the direct o-s API host
+ *   an already-direct host              -> unchanged, trailing slash removed
  *
- * A huggingface.co/spaces/... URL or a trailing slash produces the same
- * "Could not resolve app config." failure, so normalize rather than trust it.
+ * A Space *page* URL or a trailing slash produces the same "Could not resolve
+ * app config." failure, so normalize rather than trust whatever is in the DB.
  */
 export function normalizeSpaceUrl(raw: string): string {
   const value = (raw || '').trim().replace(/\/+$/, '');
   if (!value) throw new Error('GPU worker has no URL configured.');
 
   const asSlug = (owner: string, space: string): string => {
-    const host = `${owner}-${space}`.toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    return `https://${host}.hf.space`;
+    const host = (owner + '-' + space).toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    return SCHEME + host + SPACE_HOST_SUFFIX;
   };
 
   const hfPage = value.match(/^https?:\/\/huggingface\.co\/spaces\/([^/]+)\/([^/]+)/i);
