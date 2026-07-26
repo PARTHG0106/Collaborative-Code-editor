@@ -39,8 +39,10 @@ coverage/
 .turbo/
 
 # Prisma
+# migration_lock.toml is intentionally NOT ignored: Prisma expects it to be
+# committed so it can detect a provider mismatch between the migrations and the
+# target database. `migrate deploy` warns when it is missing.
 apps/server/prisma/*.db
-apps/server/prisma/migrations/**/migration_lock.toml
 
 # Docker
 docker-data/
@@ -48,5 +50,8 @@ docker-data/
 # Misc
 *.tsbuildinfo
 
-# Custom generated client
+# Generated Prisma client (output is set to src/generated/client in schema.prisma)
 apps/server/src/generated/
+
+# Local scratch
+.prisma/cli/state.json

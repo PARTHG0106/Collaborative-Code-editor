@@ -24,7 +24,7 @@ const IDELayout = lazy(() =>
 /** Shown while a lazy route chunk is in flight. */
 const RouteFallback: React.FC = () => (
   <div className="min-h-screen w-full flex items-center justify-center">
-    <div className="text-[var(--text-secondary)] text-sm animate-pulse">Loading\u2026</div>
+    <div className="text-[var(--text-secondary)] text-sm animate-pulse">Loading…</div>
   </div>
 );
 
