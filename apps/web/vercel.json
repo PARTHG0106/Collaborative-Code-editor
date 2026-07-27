@@ -1,12 +1,11 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "rewrites": [
     {
-      "_comment": "Proxies the API through this origin so the browser never makes a cross-origin request. Hugging Face's router intercepts CORS preflights and answers them without Access-Control-Allow-Credentials, which blocks every credentialed request that carries a JSON body - login and register included. Same-origin requests require no preflight, so this sidesteps the interception entirely. Requires VITE_API_URL=/api. Must precede the SPA fallback.",
       "source": "/api/:path*",
       "destination": "https://parthg0106-syncscript-api.hf.space/api/:path*"
     },
     {
-      "_comment": "SPA fallback. Excludes /api/ so the proxy rule above is not shadowed.",
       "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
