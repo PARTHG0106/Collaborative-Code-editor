@@ -5,6 +5,12 @@ set -eu
 # fixed synthetic credentials on an internal Docker network; no host ports.
 image=${1:-syncscript-api-check:latest}
 directory=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# Git Bash otherwise rewrites Linux container paths such as /tests into host
+# paths. Convert only the bind-mount source, then keep Docker arguments intact.
+if command -v cygpath >/dev/null 2>&1; then
+  directory=$(cygpath -am "$directory")
+  export MSYS_NO_PATHCONV=1
+fi
 prefix="syncscript-smoke-$(date +%s)-$$"
 network="$prefix-net"
 database="$prefix-db"
