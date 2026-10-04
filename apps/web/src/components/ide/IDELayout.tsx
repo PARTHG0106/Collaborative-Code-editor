@@ -13,14 +13,17 @@ import { RightPanel } from './RightPanel';
 import { useFileSystem, FileSystemItem } from './hooks/useFileSystem';
 import { useWorkspaceSocket } from './hooks/useWorkspaceSocket';
 import { ExecutionOrchestrator, getLangFromFilename } from '../../lib/execution/ExecutionOrchestrator';
+import { RemoteExecutionSession } from '../../lib/execution/RemoteExecutionSession';
 import { TerminalPanel } from '../../lib/execution/terminal/TerminalPanel';
 import { TerminalManager } from '../../lib/execution/terminal/TerminalManager';
+import { TerminalSession, TerminalStatus } from '../../lib/execution/terminal/TerminalSession';
 import { AgentConnector } from '../../lib/execution/AgentConnector';
 import { ExecutionTarget } from '../../lib/execution/types';
 import { NotebookRenderer, NotebookCell, CellOutput } from '../../lib/execution/notebook/NotebookRenderer';
 import { parseNotebook, serializeNotebook, NotebookKernel } from '../../lib/execution/notebook/NotebookExecutor';
 import Editor from '@monaco-editor/react';
-import { io, Socket } from 'socket.io-client';
+import { useCollaborativeFiles } from './hooks/useCollaborativeFiles';
+import { normalizeEditorContent, editorOffsetToDocumentOffset, documentOffsetToEditorOffset, mapEditorChanges } from '../../lib/EditorText';
 import {
   File, X, Terminal as TerminalIcon, Loader2, Play, Square
 } from 'lucide-react';
@@ -85,7 +88,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [openTabs, setOpenTabs] = useState<FileSystemItem[]>([]);
-  const [editorContent, setEditorContent] = useState('');
+  const [preview, setPreview] = useState<{ fileId: string; content: string } | null>(null);
 
   // Execution state
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -94,7 +97,12 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const [runTarget, setRunTarget] = useState<'auto' | ExecutionTarget>('auto');
   const [agentConnected, setAgentConnected] = useState(false);
   const orchestratorRef = useRef(new ExecutionOrchestrator());
+  const remoteExecutionRef = useRef<RemoteExecutionSession | null>(null);
+  const executionAttemptRef = useRef(0);
   const terminalManagerRef = useRef<TerminalManager | null>(null);
+  const [terminalManager, setTerminalManager] = useState<TerminalManager | null>(null);
+  const [terminalStatus, setTerminalStatus] = useState<TerminalStatus>('disconnected');
+  const terminalSessionRef = useRef<TerminalSession | null>(null);
   const agentRef = useRef(new AgentConnector());
   
   // Notebook state
@@ -146,45 +154,67 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [terminalOpen]);
 
-  // File system hook
-  const fs = useFileSystem(workspaceId);
-  // Socket hook
-  const ws = useWorkspaceSocket(workspaceId);
-
-  // Editor refs
+  const ws = useWorkspaceSocket(workspaceId, rightPanelOpen);
+  useEffect(() => () => {
+    const execution = remoteExecutionRef.current;
+    if (!execution) return;
+    execution.cancel();
+    execution.dispose();
+    remoteExecutionRef.current = null;
+    orchestratorRef.current.cancel();
+    setIsExecuting(false);
+    setExecutionTarget(null);
+  }, [ws.socket, workspaceId]);
+  const fs = useFileSystem(workspaceId, ws.socket);
+  const activeFile = fs.files.find(file => file.id === fs.activeFileId);
+  const canModify = !!workspace && workspace.currentUserRole !== 'VIEWER';
+  const activeFileIdRef = useRef(fs.activeFileId);
+  activeFileIdRef.current = fs.activeFileId;
+  const editorSourceRef = useRef(activeFile?.content ?? '');
+  const collaboration = useCollaborativeFiles(ws.socket, fs.activeFileId, activeFile?.content ?? '', (fileId, content) => {
+    if (fileId === activeFileIdRef.current) editorSourceRef.current = content;
+    fs.setFiles(files => files.map(file => file.id === fileId && file.content !== content ? { ...file, content } : file));
+  });
+  const editorContent = collaboration.content;
+  editorSourceRef.current = editorContent;
+  const cursorSocketRef = useRef(ws.socket);
+  cursorSocketRef.current = ws.socket;
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
-  const socketRef = useRef<Socket | null>(null);
-  const serverVersionRef = useRef(0);
-  const localVersionRef = useRef(0);
-  const isRemoteEditRef = useRef(false);
   const decorationsRef = useRef<Map<string, string[]>>(new Map());
-  const activeFileIdRef = useRef<string | null>(null);
 
   useEffect(() => {
-    activeFileIdRef.current = fs.activeFileId;
-  }, [fs.activeFileId]);
+    terminalManager?.setRawMode(!isExecuting);
+    terminalManager?.setInputEnabled(isExecuting || terminalStatus === 'ready');
+  }, [isExecuting, terminalManager, terminalStatus]);
 
   useEffect(() => {
-    if (terminalManagerRef.current) {
-      terminalManagerRef.current.setRawMode(!isExecuting);
+    if (!terminalManager || !ws.socket) {
+      setTerminalStatus('disconnected');
+      return;
     }
-  }, [isExecuting]);
+    const session = new TerminalSession(ws.socket, terminalManager, workspaceId, setTerminalStatus);
+    terminalSessionRef.current = session;
+    return () => {
+      session.dispose();
+      if (terminalSessionRef.current === session) terminalSessionRef.current = null;
+    };
+  }, [terminalManager, ws.socket, workspaceId]);
 
   useEffect(() => {
-    if (ws.socket) {
-      ws.socket.emit('terminal:spawn', { workspaceId });
-      
-      const onConnect = () => {
-        ws.socket?.emit('terminal:spawn', { workspaceId });
-      };
-      
-      ws.socket.on('connect', onConnect);
-      return () => {
-        ws.socket?.off('connect', onConnect);
-      };
-    }
-  }, [ws.socket, workspaceId]);
+    return terminalManager?.onData(input => orchestratorRef.current.sendInput(input));
+  }, [terminalManager]);
+
+  const handleTerminalReady = useCallback((manager: TerminalManager) => {
+    manager.setInputEnabled(false);
+    terminalManagerRef.current = manager;
+    setTerminalManager(manager);
+  }, []);
+
+  const handleTerminalDispose = useCallback((manager: TerminalManager) => {
+    if (terminalManagerRef.current === manager) terminalManagerRef.current = null;
+    setTerminalManager(current => current === manager ? null : current);
+  }, []);
 
   // Versions
   const [versions, setVersions] = useState<any[]>([]);
@@ -208,144 +238,76 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   // Fetch files
   useEffect(() => { fs.fetchFiles(); }, []);
 
-  // Use the shared socket from useWorkspaceSocket instead of duplicating
+  // Each opened document drains its edit queue independently of the active tab.
   useEffect(() => {
-    socketRef.current = ws.socket;
-  }, [ws.socket]);
+    if (activeFile?.name.endsWith('.ipynb')) setNotebookCells(parseNotebook(editorContent));
+  }, [fs.activeFileId, activeFile?.name, editorContent]);
 
-  // File room sync
+  useEffect(() => {
+    setPreview(null);
+    setVersions([]);
+    decorationsRef.current.clear();
+  }, [fs.activeFileId]);
+
+  useEffect(() => {
+    if (fs.filesLoading) return;
+    setOpenTabs(tabs => tabs.flatMap(tab => {
+      const current = fs.files.find(file => file.id === tab.id);
+      return current ? [current] : [];
+    }));
+  }, [fs.files, fs.filesLoading]);
+
   useEffect(() => {
     const socket = ws.socket;
-    if (!socket || !fs.activeFileId) return;
-
-    socket.emit('join_file', { fileId: fs.activeFileId });
-
-    const onInit = ({ content, version }: any) => {
-      setEditorContent(content);
-      serverVersionRef.current = version;
-      localVersionRef.current = version;
-    };
-
-    const onAck = ({ version }: any) => {
-      serverVersionRef.current = version;
-      fs.setSaveStatus('saved');
-    };
-
-    const onEdit = ({ fileId, edit, version, userId }: any) => {
-      if (fileId !== fs.activeFileId) return;
-      serverVersionRef.current = version;
-      localVersionRef.current = version;
-      const ed = editorRef.current;
-      const monaco = monacoRef.current;
-      if (ed && monaco) {
-        const model = ed.getModel();
-        if (model) {
-          isRemoteEditRef.current = true;
-          const start = model.getPositionAt(edit.offset);
-          const end = model.getPositionAt(edit.offset + edit.length);
-          model.pushEditOperations([], [{ range: new monaco.Range(start.lineNumber, start.column, end.lineNumber, end.column), text: edit.text, forceMoveMarkers: true }], () => null);
-          isRemoteEditRef.current = false;
-        }
-      }
-    };
-
-    const onCursor = ({ userId, name, email, cursor }: any) => {
+    if (!socket) return;
+    const onCursor = ({ fileId, userId, name, cursor }: any) => {
+      if (fileId !== fs.activeFileId || !Number.isInteger(cursor?.offset)) return;
+      const editor = editorRef.current;
+      const model = editor?.getModel();
+      if (!model || !monacoRef.current) return;
       ensureCursorStyle(userId, name);
-      const ed = editorRef.current;
-      const monaco = monacoRef.current;
-      if (ed && monaco) {
-        const model = ed.getModel();
-        if (model) {
-          const prev = decorationsRef.current.get(userId) || [];
-          const pos = model.getPositionAt(cursor.offset);
-          const range = new monaco.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column);
-          const newDec = ed.deltaDecorations(prev, [{ range, options: { className: `rc-${userId}`, hoverMessage: { value: `${name}` } } }]);
-          decorationsRef.current.set(userId, newDec);
-        }
-      }
+      const pos = model.getPositionAt(documentOffsetToEditorOffset(editorSourceRef.current, cursor.offset));
+      const range = new monacoRef.current.Range(pos.lineNumber, pos.column, pos.lineNumber, pos.column);
+      const decorations = editor.deltaDecorations(decorationsRef.current.get(userId) || [], [{ range, options: { className: 'rc-' + userId, hoverMessage: { value: name } } }]);
+      decorationsRef.current.set(userId, decorations);
     };
-
-    socket.on('file_init', onInit);
-    socket.on('file_edit_ack', onAck);
-    socket.on('file_edit', onEdit);
     socket.on('cursor_update', onCursor);
-
-    return () => {
-      socket.emit('leave_file', { fileId: fs.activeFileId });
-      socket.off('file_init', onInit);
-      socket.off('file_edit_ack', onAck);
-      socket.off('file_edit', onEdit);
-      socket.off('cursor_update', onCursor);
-      decorationsRef.current.forEach(d => editorRef.current?.deltaDecorations(d, []));
-      decorationsRef.current.clear();
-    };
-  }, [fs.activeFileId, ws.socket]);
+    return () => { socket.off('cursor_update', onCursor); };
+  }, [ws.socket, fs.activeFileId]);
 
   const handleEditorMount = (editor: any, monaco: any) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
-
-    editor.onDidChangeModelContent((e: any) => {
-      if (isRemoteEditRef.current) return;
-      e.changes.forEach((c: any) => {
-        if (socketRef.current && activeFileIdRef.current) {
-          socketRef.current.emit('edit_file', {
-            fileId: activeFileIdRef.current,
-            baseVersion: localVersionRef.current,
-            edit: { offset: c.rangeOffset, text: c.text, length: c.rangeLength }
-          });
-          localVersionRef.current += 1;
-          fs.setSaveStatus('unsaved');
-        }
-      });
+    // Monaco normalizes line endings in its model. Keep its view in LF and
+    // translate positions against the file's original text at the boundary.
+    const mountedModel = editor.getModel();
+    const ensureLF = () => {
+      if (mountedModel && mountedModel.getEOL() !== '\n') mountedModel.setEOL(monaco.editor.EndOfLineSequence.LF);
+    };
+    ensureLF();
+    // A read-only setValue can rebuild an empty model with Windows defaults.
+    const modelSubscription = mountedModel?.onDidChangeContent((event: any) => {
+      if (event.isFlush || event.isEolChange) ensureLF();
     });
-
-    editor.onDidChangeCursorPosition((e: any) => {
-      if (socketRef.current && activeFileIdRef.current) {
-        const model = editor.getModel();
-        if (model) {
-          socketRef.current.emit('cursor_move', {
-            fileId: activeFileIdRef.current,
-            cursor: { lineNumber: e.position.lineNumber, column: e.position.column, offset: model.getOffsetAt(e.position) }
-          });
-        }
-      }
+    const fileId = fs.activeFileId;
+    const subscription = editor.onDidChangeCursorPosition((event: any) => {
+      // Token refresh can replace the socket without remounting this editor.
+      const socket = cursorSocketRef.current;
+      const model = editor.getModel();
+      if (socket?.connected && fileId && model) socket.emit('cursor_move', { fileId, cursor: { offset: editorOffsetToDocumentOffset(editorSourceRef.current, model.getOffsetAt(event.position)) } });
     });
+    editor.onDidDispose(() => { subscription.dispose(); modelSubscription?.dispose(); });
   };
-
-  // Auto-save
-  useEffect(() => {
-    if (fs.activeFileId) {
-      const activeItem = fs.files.find(f => f.id === fs.activeFileId);
-      if (activeItem?.content) {
-        setEditorContent(activeItem.content);
-        if (activeItem.name.endsWith('.ipynb')) {
-          setNotebookCells(parseNotebook(activeItem.content));
-        }
-      } else {
-        setEditorContent('');
-        if (activeItem?.name.endsWith('.ipynb')) setNotebookCells([]);
-      }
-    }
-  }, [fs.activeFileId]);
-
-  useEffect(() => {
-    if (!fs.activeFileId) return;
-    const file = fs.files.find(f => f.id === fs.activeFileId);
-    if (!file || file.content === editorContent) { fs.setSaveStatus('saved'); return; }
-    fs.setSaveStatus('unsaved');
-    const t = setTimeout(() => fs.saveFileContent(fs.activeFileId!, editorContent), 1500);
-    return () => clearTimeout(t);
-  }, [editorContent, fs.activeFileId]);
 
   // Fetch versions when snapshots panel is active
   const fetchVersions = useCallback(async () => {
     if (!fs.activeFileId) return;
+    const fileId = fs.activeFileId;
     setVersionsLoading(true);
     try {
-      const res = await apiClient.get(`/workspaces/${workspaceId}/files/${fs.activeFileId}/versions`);
-      if (res.data?.success) setVersions(res.data.data);
-    } catch { } finally { setVersionsLoading(false); }
+      const res = await apiClient.get(`/workspaces/${workspaceId}/files/${fileId}/versions`);
+      if (activeFileIdRef.current === fileId && res.data?.success) setVersions(res.data.data);
+    } catch { /* snapshot list is best-effort */ } finally { if (activeFileIdRef.current === fileId) setVersionsLoading(false); }
   }, [fs.activeFileId, workspaceId, apiClient]);
 
   useEffect(() => { if (activity === 'snapshots') fetchVersions(); }, [activity, fs.activeFileId, fetchVersions]);
@@ -353,8 +315,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   // Handlers
   const selectFile = (file: FileSystemItem) => {
     fs.setActiveFileId(file.id);
-    setEditorContent(file.content || '');
-    fs.setSaveStatus('saved');
+    setPreview(null);
     setOpenTabs(prev => prev.find(t => t.id === file.id) ? prev : [...prev, file]);
   };
 
@@ -363,7 +324,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     if (fs.activeFileId === id) {
       const remaining = openTabs.filter(t => t.id !== id);
       if (remaining.length) selectFile(remaining[remaining.length - 1]);
-      else { fs.setActiveFileId(null); setEditorContent(''); }
+      else fs.setActiveFileId(null);
     }
   };
 
@@ -383,7 +344,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     try {
       const res = await apiClient.patch(`/workspaces/${workspaceId}/members/${userId}`, { role });
       if (res.data?.success) setWorkspace(prev => prev ? { ...prev, members: prev.members.map(m => m.userId === userId ? { ...m, role: res.data.data.role } : m) } : null);
-    } catch { }
+    } catch { /* role change failed; UI will reflect server state on next load */ }
   };
 
   const handleRemoveMember = async (userId: string) => {
@@ -393,19 +354,19 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
       await apiClient.delete(`/workspaces/${workspaceId}/members/${userId}`);
       if (isSelf) onBack();
       else setWorkspace(prev => prev ? { ...prev, members: prev.members.filter(m => m.userId !== userId) } : null);
-    } catch { }
+    } catch { /* removal failed; membership list unchanged */ }
   };
 
   const handleSaveSettings = async (name: string, desc: string) => {
     try {
       const res = await apiClient.patch(`/workspaces/${workspaceId}`, { name, description: desc });
       if (res.data?.success) setWorkspace(prev => prev ? { ...prev, name: res.data.data.name, description: res.data.data.description } : null);
-    } catch { }
+    } catch { /* settings save failed; keep current values */ }
   };
 
   const handleDeleteWorkspace = async () => {
     if (!window.confirm('Delete this workspace permanently?')) return;
-    try { await apiClient.delete(`/workspaces/${workspaceId}`); onBack(); } catch { }
+    try { await apiClient.delete(`/workspaces/${workspaceId}`); onBack(); } catch { /* delete failed; stay on the workspace */ }
   };
 
   const handleEditorAreaClick = () => {
@@ -415,61 +376,71 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   };
 
   const handleCreateSnapshot = async () => {
-    if (!fs.activeFileId) return;
+    if (!fs.activeFileId || !canModify || collaboration.saveStatus !== 'saved') return;
+    const fileId = fs.activeFileId;
     setActionLoading(true);
     try {
-      const res = await apiClient.post(`/workspaces/${workspaceId}/files/${fs.activeFileId}/versions`);
-      if (res.data?.success) setVersions(prev => [res.data.data, ...prev]);
-    } catch { } finally { setActionLoading(false); }
+      const res = await apiClient.post(`/workspaces/${workspaceId}/files/${fileId}/versions`);
+      if (activeFileIdRef.current === fileId && res.data?.success) setVersions(prev => [res.data.data, ...prev]);
+    } catch { /* snapshot creation failed */ } finally { setActionLoading(false); }
+  };
+
+  const handlePreviewVersion = async (versionId: string) => {
+    if (!fs.activeFileId) return;
+    const fileId = fs.activeFileId;
+    setActionLoading(true);
+    try {
+      const res = await apiClient.get('/workspaces/' + workspaceId + '/files/' + fileId + '/versions/' + versionId);
+      if (res.data?.success) setPreview({ fileId, content: res.data.data.content });
+    } catch { setError('Failed to load snapshot'); } finally { setActionLoading(false); }
   };
 
   const handleRestoreVersion = async (versionId: string) => {
-    if (!fs.activeFileId) return;
+    if (!fs.activeFileId || !canModify || !collaboration.ready) return;
+    const fileId = fs.activeFileId;
     setActionLoading(true);
     try {
-      const res = await apiClient.post(`/workspaces/${workspaceId}/files/${fs.activeFileId}/versions/${versionId}/restore`);
+      const res = await apiClient.get('/workspaces/' + workspaceId + '/files/' + fileId + '/versions/' + versionId);
       if (res.data?.success) {
-        setEditorContent(res.data.data.content);
-        if (socketRef.current) {
-          socketRef.current.emit('edit_file', {
-            fileId: fs.activeFileId, baseVersion: localVersionRef.current,
-            edit: { offset: 0, text: res.data.data.content, length: editorContent.length }
-          });
-        }
+        collaboration.replaceContent(fileId, res.data.data.content);
+        setPreview(null);
       }
-    } catch { } finally { setActionLoading(false); }
+    } catch { setError('Failed to restore snapshot'); } finally { setActionLoading(false); }
   };
 
   const handleRunCode = async () => {
-    if (!fs.activeFileId) return;
+    if (!fs.activeFileId || isExecuting || remoteExecutionRef.current) return;
     const file = fs.files.find(f => f.id === fs.activeFileId);
     if (!file) return;
+    const attempt = ++executionAttemptRef.current;
 
     const lang = getLangFromFilename(file.name);
-    if (!lang) {
-      setTerminalOpen(true);
-      terminalManagerRef.current?.clear();
-      terminalManagerRef.current?.writeStderr(`Unsupported file type: .${file.name.split('.').pop()}\r\n`);
-      return;
-    }
-
     setIsExecuting(true);
     setTerminalOpen(true);
     
     // Wait for the TerminalPanel to mount and initialize the manager
     let retries = 0;
-    while (!terminalManagerRef.current && retries < 20) {
+    while (!terminalManagerRef.current && retries < 20 && attempt === executionAttemptRef.current) {
       await new Promise(r => setTimeout(r, 50));
       retries++;
+    }
+
+    if (attempt !== executionAttemptRef.current) return;
+
+    if (!terminalManagerRef.current) {
+      setIsExecuting(false);
+      setError('The terminal could not open. Try running the file again.');
+      return;
+    }
+    if (!lang) {
+      terminalManagerRef.current.writeStderr(`Unsupported file type: .${file.name.split('.').pop()}\r\n`);
+      setIsExecuting(false);
+      return;
     }
     
     const target = runTarget === 'auto' ? orchestratorRef.current.selectTarget(lang) : runTarget;
     setExecutionTarget(target);
 
-    // If manual target is unsupported by Browser/Agent, it falls back to Remote/GPU in execute.
-    // For now we just pass it to execute (we might need to update ExecutionOrchestrator to accept an override target).
-    // Wait, ExecutionOrchestrator currently selects its own target internally!
-    // Let's pass the override target.
     await orchestratorRef.current.execute(
       file.name,
       editorContent,
@@ -491,41 +462,39 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
         : undefined,
       // Remote executor
       async (lang, code, cb, target) => {
-        if (!ws.socket) {
+        if (!ws.socket?.connected) {
           cb.onStderr('WebSocket not connected\r\n');
           cb.onExit(1);
           return;
         }
         
-        // Handle input to remote server
-        orchestratorRef.current.setRemoteInputHandler((input) => {
-          ws.socket!.emit('execution:stdin', { sessionId: ws.socket!.id, data: input });
-        });
-
-        const onStdout = (data: any) => cb.onStdout(data.data);
-        const onStderr = (data: any) => cb.onStderr(data.data);
-        const onCompleted = (data: any) => {
-          ws.socket!.off('execution:stdout', onStdout);
-          ws.socket!.off('execution:stderr', onStderr);
-          ws.socket!.off('execution:completed', onCompleted);
-          cb.onExit(data.exitCode);
-        };
-        ws.socket.on('execution:stdout', onStdout);
-        ws.socket.on('execution:stderr', onStderr);
-        ws.socket.on('execution:completed', onCompleted);
-        ws.socket.emit('execution:start', {
+        const execution = new RemoteExecutionSession(ws.socket, {
           workspaceId,
-          fileId: fs.activeFileId,
+          fileId: file.id,
           language: lang,
           code,
-          target, // Passes 'remote' or 'gpu-worker'
+          target,
+        }, {
+          ...cb,
+          onExit: exitCode => {
+            if (remoteExecutionRef.current === execution) remoteExecutionRef.current = null;
+            cb.onExit(exitCode);
+          },
         });
+        remoteExecutionRef.current = execution;
+        orchestratorRef.current.setRemoteInputHandler(input => remoteExecutionRef.current?.sendInput(input));
+        execution.start();
       },
       target
     );
   };
 
   const handleStopCode = () => {
+    if (remoteExecutionRef.current) {
+      remoteExecutionRef.current.cancel();
+      return;
+    }
+    executionAttemptRef.current++;
     orchestratorRef.current.cancel();
     setIsExecuting(false);
     setExecutionTarget(null);
@@ -534,28 +503,20 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
 
   // --- Notebook Handlers ---
   const syncNotebookToEditor = (cells: NotebookCell[]) => {
+    if (!canModify || !collaboration.ready || !fs.activeFileId) return;
     setNotebookCells(cells);
-    const serialized = serializeNotebook(cells);
-    setEditorContent(serialized);
-    if (socketRef.current && fs.activeFileId) {
-      socketRef.current.emit('edit_file', {
-        fileId: fs.activeFileId,
-        baseVersion: localVersionRef.current,
-        edit: { offset: 0, text: serialized, length: editorContent.length }
-      });
-      localVersionRef.current += 1;
-      fs.setSaveStatus('unsaved');
-    }
+    collaboration.replaceContent(fs.activeFileId, serializeNotebook(cells));
   };
 
   const handleCellChange = (id: string, source: string) => {
+    if (notebookCells.find(cell => cell.id === id)?.source === source) return;
     const newCells = notebookCells.map(c => c.id === id ? { ...c, source } : c);
     syncNotebookToEditor(newCells);
   };
 
   const handleAddCell = (afterId: string, type: 'code' | 'markdown') => {
     const idx = notebookCells.findIndex(c => c.id === afterId);
-    const newCell: NotebookCell = { id: `cell-${Date.now()}`, type, source: '', outputs: [], executionCount: null, isRunning: false };
+    const newCell: NotebookCell = { id: crypto.randomUUID(), type, source: '', outputs: [], executionCount: null, isRunning: false };
     const newCells = [...notebookCells];
     newCells.splice(idx >= 0 ? idx + 1 : newCells.length, 0, newCell);
     syncNotebookToEditor(newCells);
@@ -579,6 +540,8 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   };
 
   const handleRunCell = async (id: string) => {
+    if (!canModify || !collaboration.ready || !fs.activeFileId) return;
+    const fileId = fs.activeFileId;
     if (!notebookKernelRef.current) notebookKernelRef.current = new NotebookKernel();
     
     setNotebookCells(cells => cells.map(c => c.id === id ? { ...c, isRunning: true, outputs: [] } : c));
@@ -591,6 +554,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
       cell,
       (outputs) => {
         finalOutputs = outputs;
+        if (activeFileIdRef.current !== fileId) return;
         setNotebookCells(cells => cells.map(c => c.id === id ? { ...c, outputs } : c));
       },
       () => {
@@ -600,6 +564,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
       }
     );
 
+    if (activeFileIdRef.current !== fileId) return;
     setNotebookCells(cells => {
       const newCells = cells.map(c => c.id === id ? { 
         ...c, 
@@ -608,13 +573,15 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
         executionCount: notebookKernelRef.current?.getExecutionCount() || null
       } : c);
       // Sync final outputs to file immediately after state calculation
-      setTimeout(() => syncNotebookToEditor(newCells), 0);
+      setTimeout(() => { if (activeFileIdRef.current === fileId) syncNotebookToEditor(newCells); }, 0);
       return newCells;
     });
   };
 
   const handleRunAllCells = async () => {
+    const fileId = fs.activeFileId;
     for (const cell of notebookCells) {
+      if (activeFileIdRef.current !== fileId) return;
       if (cell.type === 'code') await handleRunCell(cell.id);
     }
   };
@@ -624,8 +591,6 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   if (!workspace) return <div className="ide-root ide-dark" style={{ alignItems: 'center', justifyContent: 'center', gap: 8 }}><span>Failed to load workspace</span><button className="ide-btn" onClick={onBack}>Back</button></div>;
 
   const isOwner = workspace.currentUserRole === 'OWNER';
-  const canModify = workspace.currentUserRole !== 'VIEWER';
-  const activeFile = fs.files.find(f => f.id === fs.activeFileId);
   const editorLang = activeFile ? getLanguage(activeFile.name) : 'plaintext';
 
   return (
@@ -633,12 +598,25 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
       <TopBar
         workspaceName={workspace.name}
         collaboratorCount={ws.activeCollaborators.length}
-        isConnected={true}
+        isConnected={ws.isConnected}
         userName={user?.name || ''}
-        onBack={onBack}
+        onBack={() => { if (!collaboration.hasPendingChanges || window.confirm('Changes or recovered copies are still unsaved. Leave this workspace?')) onBack(); }}
         rightPanelOpen={rightPanelOpen}
         onToggleRightPanel={() => setRightPanelOpen(p => !p)}
       />
+      {(error || collaboration.error) && <div role="alert" style={{ padding: 8, color: 'var(--ide-danger)' }}>{error || collaboration.error}</div>}
+      {collaboration.recoveries.map(draft => <div role="alert" key={`${draft.fileId}-${draft.id}`} style={{ padding: 8 }}>
+        An unsynced copy was preserved. Download it to keep your changes.
+        <button className="ide-btn" onClick={() => {
+          const url = URL.createObjectURL(new Blob([draft.content], { type: 'text/plain' }));
+          const link = document.createElement('a'); link.href = url;
+          link.download = 'recovered-' + (fs.files.find(file => file.id === draft.fileId)?.name || 'file.txt');
+          link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }}>Download preserved copy</button>
+        <button className="ide-btn" onClick={() => {
+          if (window.confirm('Dismiss this preserved copy? Download it first if you need it.')) collaboration.dismissRecovery(draft.fileId, draft.id);
+        }}>Dismiss preserved copy</button>
+      </div>)}
       <div className="ide-body">
         <ActivityBar active={activity} onSelect={handleActivity} sidebarVisible={sidebarVisible} />
 
@@ -648,7 +626,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
               files={fs.files} filesLoading={fs.filesLoading} activeFileId={fs.activeFileId}
               expandedFolders={fs.expandedFolders} canModify={canModify}
               onSelectFile={selectFile}
-              onToggleFolder={id => fs.setExpandedFolders(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; })}
+              onToggleFolder={id => fs.setExpandedFolders(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
               onCreateFile={(name, type, parentId, content) => fs.createFile(name, type, parentId, content).then(item => { if (item && type === 'FILE') selectFile(item); return item; })}
               onRenameFile={fs.renameFile} onDeleteFile={fs.deleteFile}
             />
@@ -664,9 +642,9 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           {activity === 'snapshots' && (
             <SnapshotsPanel
               activeFileId={fs.activeFileId} activeFileName={activeFile?.name || null}
-              versions={versions} loading={versionsLoading} actionLoading={actionLoading}
+              versions={versions} loading={versionsLoading} actionLoading={actionLoading || !canModify || !collaboration.ready || collaboration.saveStatus !== 'saved'}
               onCreateSnapshot={handleCreateSnapshot}
-              onPreview={content => { setEditorContent(content); fs.setSaveStatus('unsaved'); }}
+              onPreview={handlePreviewVersion}
               onRestore={handleRestoreVersion}
             />
           )}
@@ -743,8 +721,14 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           {/* Editor */}
           {fs.activeFileId && activeFile ? (
             <div className="ide-editor-body">
-              {editorLang === 'jupyter' ? (
+              {preview?.fileId === fs.activeFileId ? (
+                <>
+                  <div style={{ padding: 8 }}>Snapshot preview <button className="ide-btn" onClick={() => setPreview(null)}>Back to editing</button></div>
+                  <Editor key={'preview-' + preview.fileId} height="100%" language={editorLang} theme={theme === 'dark' ? 'vs-dark' : 'vs'} value={preview.content} options={{ readOnly: true }} />
+                </>
+              ) : editorLang === 'jupyter' ? (
                 <NotebookRenderer
+                  readOnly={!canModify || !collaboration.ready}
                   cells={notebookCells}
                   onCellChange={handleCellChange}
                   onRunCell={handleRunCell}
@@ -756,12 +740,20 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
                 />
               ) : (
                 <Editor
+                  key={fs.activeFileId}
                   height="100%"
                   path={fs.activeFileId}
                   language={editorLang}
                   theme={theme === 'dark' ? 'vs-dark' : 'vs'}
-                  value={editorContent}
-                  onChange={val => setEditorContent(val || '')}
+                  value={normalizeEditorContent(editorContent)}
+                  onChange={(val, event) => {
+                    if (event.isFlush || event.isEolChange) return;
+                    if (canModify && collaboration.ready && fs.activeFileId) {
+                      const changes = event.changes.map(change => ({ offset: change.rangeOffset, length: change.rangeLength, text: change.text }));
+                      const mapped = mapEditorChanges(editorSourceRef.current, changes, val ?? '');
+                      collaboration.replaceContent(fs.activeFileId, mapped.content, mapped.edits);
+                    }
+                  }}
                   onMount={handleEditorMount}
                   options={{
                     minimap: { enabled: true },
@@ -770,7 +762,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
                     lineNumbers: 'on',
                     roundedSelection: true,
                     scrollBeyondLastLine: false,
-                    readOnly: !canModify,
+                    readOnly: !canModify || !collaboration.ready,
                     automaticLayout: true,
                     tabSize: 2,
                     insertSpaces: true,
@@ -795,30 +787,10 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
             onClose={() => setTerminalOpen(false)}
             executionTarget={executionTarget}
             isRunning={isExecuting}
-            onTerminalReady={(manager) => { 
-              terminalManagerRef.current = manager;
-              manager.setRawMode(!isExecuting);
-              
-              if (ws.socket) {
-                ws.socket.on('terminal:output', (payload: any) => {
-                  manager.writeStdout(payload.data);
-                });
-              }
-
-              manager.onRawData((data) => {
-                if (orchestratorRef.current.getIsRunning()) {
-                  const input = data === '\r' ? '\n' : data;
-                  orchestratorRef.current.sendInput(input);
-                } else if (ws.socket) {
-                  ws.socket.emit('terminal:data', { data });
-                }
-              });
-
-              // Also request a terminal spawn if not spawned
-              if (ws.socket) {
-                ws.socket.emit('terminal:spawn', { workspaceId });
-              }
-            }}
+            status={terminalStatus}
+            onRestart={() => terminalSessionRef.current?.restart()}
+            onTerminalReady={handleTerminalReady}
+            onTerminalDispose={handleTerminalDispose}
           />
 
           {/* Status Bar */}
@@ -832,7 +804,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
                 <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: agentConnected ? 'var(--ide-success)' : 'var(--ide-text-muted)', display: 'inline-block' }} />
                 {agentConnected ? 'Agent' : 'No Agent'}
               </span>
-              <span className="ide-statusbar-item">{fs.saveStatus === 'saved' ? '✓ Saved' : fs.saveStatus === 'saving' ? 'Saving...' : '● Unsaved'}</span>
+              <span className="ide-statusbar-item">{!collaboration.ready && fs.activeFileId ? 'Reconnecting...' : collaboration.saveStatus === 'saved' ? '✓ Saved' : collaboration.saveStatus === 'saving' ? 'Saving...' : '● Unsaved'}</span>
             </div>
           </div>
         </div>
@@ -855,6 +827,6 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
 // --- Exported Component with Theme Provider ---
 export const IDELayout: React.FC<{ workspaceId: string; onBack: () => void }> = (props) => (
   <IDEThemeProvider>
-    <IDEInner {...props} />
+    <IDEInner key={props.workspaceId} {...props} />
   </IDEThemeProvider>
 );

@@ -15,6 +15,9 @@ out/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.d1-local
+# User-supplied Cloudflare credentials are local configuration, never source.
+cloudflared1cred.txt
 
 # IDE
 .vscode/
@@ -49,6 +52,9 @@ docker-data/
 
 # Misc
 *.tsbuildinfo
+
+# Build artifact: tsc -b emits this next to the vite.config.ts source
+apps/web/vite.config.js
 
 # Generated Prisma client (output is set to src/generated/client in schema.prisma)
 apps/server/src/generated/

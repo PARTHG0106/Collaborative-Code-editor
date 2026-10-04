@@ -87,10 +87,7 @@ export const config = {
   /** Is development? */
   isDevelopment: process.env.NODE_ENV !== 'production',
 
-  /**
-   * Interactive shell access over the socket. Off unless explicitly enabled,
-   * because it hands a workspace member a real process on the API host.
-   */
+  /** Administrative switch for the isolated workspace terminal. */
   enableTerminal: process.env.ENABLE_TERMINAL === 'true',
 
   /** JWT configuration settings */
@@ -112,8 +109,7 @@ export function validateConfig(): void {
 
   const dbUrl = process.env.DATABASE_URL || '';
   if (dbUrl) {
-    const masked = dbUrl.replace(/:([^:@]+)@/, ':***@');
-    console.info(`ℹ️ Loaded DATABASE_URL: ${masked}`);
+    console.info('ℹ️ DATABASE_URL is configured.');
   } else {
     console.warn('⚠️ DATABASE_URL is not set in process.env!');
   }

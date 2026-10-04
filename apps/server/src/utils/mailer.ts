@@ -1,4 +1,4 @@
-import nodemailer from 'nodemailer';
+import nodemailer, { type Transporter } from 'nodemailer';
 import axios from 'axios';
 
 interface MailOptions {
@@ -15,7 +15,7 @@ const SMTP_USER = process.env.SMTP_USER;
 const SMTP_PASS = process.env.SMTP_PASS;
 const SMTP_FROM = process.env.SMTP_FROM || 'no-reply@collabedit.com';
 
-let transporter: nodemailer.Transporter | null = null;
+let transporter: Transporter | null = null;
 
 // Determine if we should use Brevo REST API (using an API key)
 const isBrevoApi = !!(SMTP_PASS && SMTP_PASS.startsWith('xkeysib-'));

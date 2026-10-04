@@ -82,7 +82,9 @@ describe('Frontend App Component & Auth Flows', () => {
     render(<App />);
 
     expect(screen.getByText('SyncScript')).toBeInTheDocument();
-    expect(screen.getByText((_, el) => el?.textContent === 'CollaborativeCoding,')).toBeInTheDocument();
+    // The hero heading renders as a plain span ("Collaborative Coding,"). The
+    // matcher normalizes whitespace, so match the visible text directly.
+    expect(screen.getByText('Collaborative Coding,')).toBeInTheDocument();
     expect(screen.getByText('Querying API status...')).toBeInTheDocument();
   });
 
@@ -153,8 +155,11 @@ describe('Frontend App Component & Auth Flows', () => {
     const signUpLink = screen.getByText('Sign Up');
     fireEvent.click(signUpLink);
 
-    // Verify Register page is rendered
-    expect(screen.getByText('Create Account')).toBeInTheDocument();
+    // Register is lazy-loaded (React.lazy + Suspense), so the chunk resolves
+    // asynchronously — await the heading rather than asserting synchronously.
+    // Generous timeout: under full-suite parallelism the dynamic import can be
+    // slow, which is what made this test flaky before.
+    expect(await screen.findByText('Create Account', {}, { timeout: 15000 })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('John Doe')).toBeInTheDocument();
   });
 });

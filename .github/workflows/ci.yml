@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  verify:
+    name: Build, lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # prisma generate is wired into the server build, but run it explicitly so
+      # the generated client exists before type-checking regardless of task order.
+      - name: Generate Prisma client
+        run: npm run db:generate --workspace=apps/server
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+  sandbox:
+    name: Linux terminal sandbox
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build clean sandbox toolchain
+        run: docker build --target sandbox-toolchain -t syncscript-sandbox-test .
+      - name: Verify native isolation and language runtimes
+        run: docker run --rm -v "$PWD/apps/server/sandbox:/tests:ro" syncscript-sandbox-test python3 /tests/smoke.py --launcher /syncscript-sandbox --rootfs /rootfs
+      - name: Build and verify the complete API image
+        run: |
+          docker build -t syncscript-api-test .
+          docker run --rm -v "$PWD/apps/server/sandbox:/tests:ro" syncscript-api-test node /tests/adapter-smoke.cjs /app/apps/server/dist/execution/localWorkspaceRuntime.js
+          sh apps/server/sandbox/api-smoke.sh syncscript-api-test

@@ -39,7 +39,7 @@ export class AgentConnector {
               this.onStatusChange?.(true, this.runtimes);
               resolve(true);
             }
-          } catch {}
+          } catch { /* ignore malformed handshake frames */ }
         };
 
         this.ws.onerror = () => {
@@ -107,7 +107,7 @@ export class AgentConnector {
               resolve();
               break;
           }
-        } catch {}
+        } catch { /* ignore malformed execution frames */ }
       };
 
       this.ws!.addEventListener('message', this.messageHandler);

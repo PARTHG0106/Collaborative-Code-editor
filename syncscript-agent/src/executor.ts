@@ -16,6 +16,51 @@ interface LangConfig {
   compile?: (file: string) => string[];
 }
 
+/**
+ * A minimal environment for a user-submitted program.
+ *
+ * The agent executes code on the developer's own machine. Previously it spawned
+ * with `{ ...process.env }`, so submitted code could read every variable in the
+ * developer's shell - cloud tokens, API keys, CI secrets. We pass only an
+ * allowlist of OS-essential variables (plus PATH so toolchains resolve) so a
+ * program cannot harvest the operator's secrets. This is defense-in-depth
+ * alongside binding the agent to loopback and checking the connection Origin.
+ */
+function buildAgentEnv(cwd: string): Record<string, string> {
+  // Variables many runtimes/compilers genuinely need to function, especially on
+  // Windows. Deliberately excludes anything that commonly holds credentials.
+  const PASSTHROUGH = [
+    'PATH',
+    'Path',
+    'PATHEXT',
+    'SystemRoot',
+    'SystemDrive',
+    'WINDIR',
+    'ComSpec',
+    'TEMP',
+    'TMP',
+    'TMPDIR',
+    'LANG',
+    'LC_ALL',
+    'TZ',
+    'NUMBER_OF_PROCESSORS',
+    'PROCESSOR_ARCHITECTURE',
+  ];
+
+  const env: Record<string, string> = {
+    HOME: cwd,
+    PWD: cwd,
+    PYTHONUNBUFFERED: '1',
+  };
+
+  for (const key of PASSTHROUGH) {
+    const value = process.env[key];
+    if (typeof value === 'string') env[key] = value;
+  }
+
+  return env;
+}
+
 const LANG_CONFIG: Record<string, LangConfig> = {
   javascript:  { extension: '.js',   run: (f) => ['node', f] },
   typescript:  { extension: '.ts',   run: (f) => ['npx', 'tsx', f] },
@@ -84,7 +129,10 @@ export class ProcessExecutor {
       const [cmd, ...args] = config.run(tmpFile);
       this.activeProcess = spawn(cmd, args, {
         cwd: this.tmpDir,
-        env: { ...process.env, PYTHONUNBUFFERED: '1' },
+        // A minimal env: user code runs with the developer's own privileges on
+        // their machine, so there is no reason to also expose every secret in
+        // their shell environment (cloud tokens, API keys) to submitted code.
+        env: buildAgentEnv(this.tmpDir),
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
@@ -140,7 +188,7 @@ export class ProcessExecutor {
     callbacks: ExecCallbacks, captureStdout: boolean
   ): Promise<number> {
     return new Promise((resolve) => {
-      const proc = spawn(cmd, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+      const proc = spawn(cmd, args, { cwd, env: buildAgentEnv(cwd), stdio: ['pipe', 'pipe', 'pipe'] });
       if (captureStdout) proc.stdout?.on('data', (d: Buffer) => callbacks.onStdout(d.toString()));
       proc.stderr?.on('data', (d: Buffer) => callbacks.onStderr(d.toString()));
       proc.on('close', (code) => resolve(code ?? 1));

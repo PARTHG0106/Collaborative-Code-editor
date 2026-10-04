@@ -190,101 +190,93 @@ export const Landing: React.FC = () => {
               </motion.div>
 
               <motion.h1
-                className="text-4xl sm:text-6xl md:text-7xl lg:text-8xl font-bold tracking-tighter"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 1 }}
+                className="text-5xl sm:text-6xl md:text-7xl lg:text-8xl font-bold tracking-tight mb-6"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8 }}
               >
-                <span className="block mb-2 sm:mb-4">
-                  {"Collaborative Coding,".split(" ").map((word, wordIndex) => (
-                    <span key={wordIndex} className="inline-block whitespace-nowrap mr-2 sm:mr-4">
-                      {word.split("").map((char, charIndex) => {
-                        const absoluteIndex = "Collaborative Coding,".split(" ").slice(0, wordIndex).join(" ").length + charIndex + (wordIndex > 0 ? 1 : 0);
-                        return (
-                          <motion.span
-                            key={charIndex}
-                            initial={{ y: 100, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            transition={{
-                              delay: absoluteIndex * 0.03,
-                              type: "spring",
-                              stiffness: 150,
-                              damping: 25,
-                            }}
-                            className="inline-block text-[var(--text-primary)]"
-                          >
-                            {char}
-                          </motion.span>
-                        );
-                      })}
-                    </span>
-                  ))}
+                <span className="block text-[var(--text-primary)] mb-2">
+                  Collaborative Coding,
                 </span>
-                <span className="block bg-gradient-to-r from-primary via-primary/80 to-primary bg-clip-text text-transparent leading-tight">
-                  {"Perfected in Real-Time".split(" ").map((word, wordIndex) => (
-                    <span key={wordIndex} className="inline-block whitespace-nowrap mr-2 sm:mr-4">
-                      {word.split("").map((char, charIndex) => {
-                        const absoluteIndex = "Perfected in Real-Time".split(" ").slice(0, wordIndex).join(" ").length + charIndex + (wordIndex > 0 ? 1 : 0);
-                        return (
-                          <motion.span
-                            key={charIndex}
-                            initial={{ y: 100, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            transition={{
-                              delay: 0.5 + absoluteIndex * 0.03,
-                              type: "spring",
-                              stiffness: 150,
-                              damping: 25,
-                            }}
-                            className="inline-block"
-                          >
-                            {char}
-                          </motion.span>
-                        );
-                      })}
-                    </span>
-                  ))}
+                <span className="block bg-gradient-to-r from-[var(--accent-primary)] to-[var(--accent-secondary)] bg-clip-text text-transparent">
+                  Perfected in Real-Time
                 </span>
               </motion.h1>
 
               <motion.p
-                className="text-xl md:text-2xl text-muted-foreground max-w-3xl mx-auto leading-relaxed text-gray-400"
+                className="text-lg sm:text-xl md:text-2xl text-[var(--text-secondary)] max-w-3xl mx-auto leading-relaxed mb-10"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 1 }}
+                transition={{ duration: 0.8, delay: 0.2 }}
               >
-                The most powerful collaborative code editor for modern teams. Write, review, and ship code together in real-time.
+                The most powerful collaborative code editor for modern teams. Write, review, and ship code together in real-time, right from your browser.
               </motion.p>
 
               <motion.div
-                className="flex flex-col sm:flex-row gap-4 justify-center items-center pt-4"
+                className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-16"
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.6, delay: 1.2 }}
+                transition={{ duration: 0.8, delay: 0.4 }}
               >
                 {user ? (
                   <Link to="/dashboard">
-                    <Button size="lg" className="text-lg px-8 py-6 rounded-full group">
+                    <Button size="lg" className="h-14 px-8 text-base font-medium rounded-full bg-[var(--accent-primary)] hover:bg-[var(--accent-secondary)] text-[var(--bg-primary)] shadow-[var(--shadow-glow)] transition-all">
                       Go to Dashboard
-                      <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
+                      <ArrowRight className="w-5 h-5 ml-2" />
                     </Button>
                   </Link>
                 ) : (
                   <>
                     <Link to="/register">
-                      <Button size="lg" className="text-lg px-8 py-6 rounded-full group">
+                      <Button size="lg" className="h-14 px-8 text-base font-medium rounded-full bg-[var(--accent-primary)] hover:bg-[var(--accent-secondary)] text-[var(--bg-primary)] shadow-[var(--shadow-glow)] transition-all">
                         <Sparkles className="w-5 h-5 mr-2" />
                         Start Coding Free
-                        <ArrowRight className="w-5 h-5 ml-2 group-hover:translate-x-1 transition-transform" />
                       </Button>
                     </Link>
                     <Link to="/login">
-                      <Button size="lg" variant="outline" className="text-lg px-8 py-6 rounded-full backdrop-blur-sm bg-[var(--bg-secondary)] text-[var(--text-primary)] border-[var(--border)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)] transition-colors">
+                      <Button size="lg" variant="outline" className="h-14 px-8 text-base font-medium rounded-full backdrop-blur-md bg-[var(--bg-glass)] text-[var(--text-primary)] border-[var(--bg-tertiary)] hover:bg-[var(--bg-tertiary)] transition-all">
                         Sign In
                       </Button>
                     </Link>
                   </>
                 )}
+              </motion.div>
+
+              {/* Mockup visual */}
+              <motion.div
+                className="relative mx-auto max-w-5xl rounded-xl border border-[var(--border-glass)] bg-[var(--bg-secondary)] shadow-2xl overflow-hidden aspect-[16/9]"
+                initial={{ opacity: 0, y: 40 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 1, delay: 0.6 }}
+              >
+                <div className="flex items-center px-4 h-10 border-b border-[var(--border-glass)] bg-[var(--bg-tertiary)]">
+                  <div className="flex space-x-2">
+                    <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
+                    <div className="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+                    <div className="w-3 h-3 rounded-full bg-green-500/80"></div>
+                  </div>
+                  <div className="mx-auto text-xs font-mono text-[var(--text-muted)]">main.ts - SyncScript</div>
+                </div>
+                <div className="flex h-[calc(100%-40px)]">
+                  <div className="w-16 border-r border-[var(--border-glass)] flex flex-col items-center py-4 space-y-4 text-[var(--text-muted)]">
+                    <Code2 size={20} />
+                    <GitBranch size={20} />
+                  </div>
+                  <div className="flex-1 p-6 font-mono text-sm text-[var(--text-secondary)] text-left flex flex-col">
+                    <div className="text-[var(--accent-primary)]">import <span className="text-[var(--text-primary)]">{'{'}</span> createCollaboration <span className="text-[var(--text-primary)]">{'}'}</span> from <span className="text-yellow-300/90">{"'syncscript'"}</span>;</div>
+                    <br />
+                    <div><span className="text-[var(--text-primary)]">const</span> workspace = <span className="text-[var(--accent-primary)]">createCollaboration</span>({'{'}</div>
+                    <div className="pl-4">roomId: <span className="text-yellow-300/90">{"'cmqmhod6t000huklzwf8n0rb8'"}</span>,</div>
+                    <div className="pl-4">mode: <span className="text-yellow-300/90">{"'real-time'"}</span>,</div>
+                    <div className="pl-4">latency: <span className="text-blue-400">0.01</span> <span className="text-[var(--text-muted)]">{'// ultra-low latency'}</span></div>
+                    <div>{'}'});</div>
+                    <br />
+                    <div className="flex items-center text-[var(--text-primary)]">
+                      <span className="w-2 h-5 bg-[var(--accent-primary)] inline-block mr-1 animate-pulse"></span>
+                      {"workspace.on('connect', () => console.log('Ready.'));"}
+                    </div>
+                  </div>
+                </div>
               </motion.div>
 
               {/* API System Status Box */}

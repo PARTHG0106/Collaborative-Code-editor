@@ -105,6 +105,24 @@ const authAxios = axios.create({
   },
 });
 
+/**
+ * In-flight refresh promise shared across concurrent 401s.
+ *
+ * The refresh token rotates on every /auth/refresh (the server deletes the old
+ * row and issues a new one), so overlapping refreshes race: the first wins and
+ * the rest present an already-deleted token and fail. Collapsing all concurrent
+ * callers onto a single POST guarantees exactly one refresh per expiry window.
+ */
+let refreshInFlight: Promise<string> | null = null;
+
+async function performRefresh(): Promise<string> {
+  const response = await authAxios.post('/auth/refresh');
+  if (response.data && response.data.success) {
+    return response.data.data.accessToken as string;
+  }
+  throw new Error('Refresh did not return a new access token');
+}
+
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -113,6 +131,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [error, setError] = useState<string | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
+
+  /**
+   * Refresh the access token, de-duplicating concurrent callers onto one
+   * request. Updates React state with the new token and returns it so the
+   * axios interceptor can retry the original request.
+   */
+  const refreshAccessToken = useCallback(async (): Promise<string> => {
+    if (!refreshInFlight) {
+      refreshInFlight = performRefresh()
+        .then((token) => {
+          setAccessToken(token);
+          return token;
+        })
+        .finally(() => {
+          refreshInFlight = null;
+        });
+    }
+    return refreshInFlight;
+  }, []);
 
   // Sync token to Axios headers
   useEffect(() => {
@@ -150,18 +187,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           originalRequest._retry = true;
 
           try {
-            // The refresh token rides along as an httpOnly cookie; there is
-            // nothing to send in the body and nothing to store afterwards.
-            const response = await authAxios.post('/auth/refresh');
+            // Single-flight: the IDE fires several requests at once (workspace,
+            // files, chat, versions), so an expired token produces a burst of
+            // 401s. Refreshing per-request would have each one POST /auth/refresh;
+            // the server rotates the refresh token in a transaction that deletes
+            // the old row, so only the first succeeds and the rest get a 401 and
+            // log the user out mid-session. Share one in-flight refresh promise
+            // across all concurrent 401s instead.
+            const newAccessToken = await refreshAccessToken();
 
-            if (response.data && response.data.success) {
-              const newAccessToken = response.data.data.accessToken;
-              setAccessToken(newAccessToken);
-
-              // Retry the original request with the new access token
-              originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-              return apiClient(originalRequest);
-            }
+            // Retry the original request with the new access token
+            originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
+            return apiClient(originalRequest);
           } catch (refreshErr) {
             // Refresh token is expired or invalid -> log out
             setUser(null);

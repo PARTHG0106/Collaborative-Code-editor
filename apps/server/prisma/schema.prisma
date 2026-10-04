@@ -40,13 +40,16 @@ model User {
 
 model RefreshToken {
   id        String   @id @default(cuid())
-  token     String   @unique
+  tokenHash String?  @map("token_hash")
   userId    String   @map("user_id")
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   expiresAt DateTime @map("expires_at")
   revoked   Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
 
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([tokenHash])
   @@map("refresh_tokens")
 }
 
@@ -79,6 +82,7 @@ model WorkspaceMember {
   joinedAt    DateTime      @default(now()) @map("joined_at")
 
   @@unique([workspaceId, userId])
+  @@index([userId])
   @@map("workspace_members")
 }
 
@@ -92,6 +96,7 @@ model FileSystemItem {
   name        String
   type        FileSystemItemType
   content     String?            // Null for folders, text for files
+  contentKey  String?            @map("content_key") // Optional immutable D1 blob; content is inline when null
   parentId    String?            @map("parent_id")
   parent      FileSystemItem?    @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
   children    FileSystemItem[]   @relation("FolderHierarchy")
@@ -102,6 +107,7 @@ model FileSystemItem {
   versions    FileVersion[]
 
   @@unique([workspaceId, parentId, name])
+  @@index([parentId])
   @@map("file_system_items")
 }
 
@@ -114,6 +120,7 @@ model ChatMessage {
   message     String
   createdAt   DateTime  @default(now()) @map("created_at")
 
+  @@index([workspaceId, createdAt])
   @@map("chat_messages")
 }
 
@@ -122,11 +129,13 @@ model FileVersion {
   fileId    String         @map("file_id")
   file      FileSystemItem @relation(fields: [fileId], references: [id], onDelete: Cascade)
   content   String
+  contentKey String?       @map("content_key")
   version   Int
   userId    String?        @map("user_id")
   user      User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
   createdAt DateTime       @default(now()) @map("created_at")
 
+  @@index([fileId, createdAt])
   @@map("file_versions")
 }
 

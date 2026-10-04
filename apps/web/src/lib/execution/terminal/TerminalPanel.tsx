@@ -1,6 +1,7 @@
 import React, { useRef, useEffect } from 'react';
-import { Terminal as TerminalIcon, X, Globe, Monitor, Cpu } from 'lucide-react';
+import { Terminal as TerminalIcon, X, Globe, Monitor, Cpu, RotateCcw } from 'lucide-react';
 import { TerminalManager } from './TerminalManager';
+import { TerminalStatus } from './TerminalSession';
 import { ExecutionTarget } from '../types';
 import '@xterm/xterm/css/xterm.css';
 
@@ -9,7 +10,10 @@ interface TerminalPanelProps {
   onClose: () => void;
   executionTarget: ExecutionTarget | null;
   isRunning: boolean;
+  status: TerminalStatus;
+  onRestart: () => void;
   onTerminalReady: (manager: TerminalManager) => void;
+  onTerminalDispose: (manager: TerminalManager) => void;
 }
 
 const TARGET_CONFIG: Record<ExecutionTarget, { icon: React.ReactNode; label: string; color: string }> = {
@@ -20,41 +24,52 @@ const TARGET_CONFIG: Record<ExecutionTarget, { icon: React.ReactNode; label: str
 };
 
 export const TerminalPanel: React.FC<TerminalPanelProps> = ({
-  visible, onClose, executionTarget, isRunning, onTerminalReady,
+  visible, onClose, executionTarget, isRunning, status, onRestart, onTerminalReady, onTerminalDispose,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const managerRef = useRef<TerminalManager | null>(null);
+  const readyCallbackRef = useRef(onTerminalReady);
+  const disposeCallbackRef = useRef(onTerminalDispose);
+  readyCallbackRef.current = onTerminalReady;
+  disposeCallbackRef.current = onTerminalDispose;
 
   useEffect(() => {
     if (visible && containerRef.current && !managerRef.current) {
       managerRef.current = new TerminalManager(containerRef.current);
-      onTerminalReady(managerRef.current);
+      readyCallbackRef.current(managerRef.current);
     }
-
-    return () => {
-      if (!visible && managerRef.current) {
-        managerRef.current.dispose();
-        managerRef.current = null;
-      }
-    };
   }, [visible]);
+
+  useEffect(() => () => {
+    const manager = managerRef.current;
+    if (!manager) return;
+    disposeCallbackRef.current(manager);
+    manager.dispose();
+    managerRef.current = null;
+  }, []);
 
   // Re-fit when visibility changes
   useEffect(() => {
     if (visible && managerRef.current) {
-      requestAnimationFrame(() => managerRef.current?.fit());
+      const frame = requestAnimationFrame(() => {
+        managerRef.current?.fit();
+        managerRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(frame);
     }
   }, [visible]);
 
-  if (!visible) return null;
-
   const targetInfo = executionTarget ? TARGET_CONFIG[executionTarget] : null;
+  const statusLabel = {
+    connecting: 'Starting shell...', ready: 'Connected', disconnected: 'Disconnected',
+    exited: 'Shell exited', error: 'Shell unavailable',
+  }[status];
 
   return (
-    <div style={{
+    <div aria-hidden={!visible} style={{
       height: '30%', minHeight: '160px', maxHeight: '50%',
       borderTop: '1px solid var(--ide-border)',
-      display: 'flex', flexDirection: 'column',
+      display: visible ? 'flex' : 'none', flexDirection: 'column',
       background: '#111312',
     }}>
       {/* Terminal Header */}
@@ -71,6 +86,8 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
             <TerminalIcon size={12} />
             <span style={{ fontWeight: 600, letterSpacing: '0.5px' }}>TERMINAL</span>
           </div>
+
+          <span role="status" aria-live="polite">{statusLabel}</span>
 
           {/* Execution target badge */}
           {targetInfo && (
@@ -93,13 +110,22 @@ export const TerminalPanel: React.FC<TerminalPanelProps> = ({
           )}
         </div>
 
-        <button
-          className="ide-icon-btn"
-          onClick={onClose}
-          style={{ padding: '2px' }}
-        >
-          <X size={14} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {(status === 'exited' || status === 'error') && (
+            <button className="ide-icon-btn" onClick={onRestart} aria-label="Restart terminal" title="Restart terminal" disabled={isRunning}>
+              <RotateCcw size={14} />
+            </button>
+          )}
+          <button
+            className="ide-icon-btn"
+            onClick={onClose}
+            aria-label="Hide terminal"
+            title="Hide terminal (Ctrl+`)"
+            style={{ padding: '2px' }}
+          >
+            <X size={14} />
+          </button>
+        </div>
       </div>
 
       {/* Terminal Body */}

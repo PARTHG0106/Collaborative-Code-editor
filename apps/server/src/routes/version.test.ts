@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { createApp } from '../app.js';
 import { config } from '../config/index.js';
 import prisma from '../lib/prisma.js';
+import { forgetActiveFiles } from '../socket.js';
 
 vi.mock('../lib/prisma.js', () => {
   const mockPrisma = {
@@ -44,6 +45,8 @@ describe('Workspace File Version Routes', () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });
+
+  afterEach(() => forgetActiveFiles(['file-1']));
 
   describe('GET /api/workspaces/:workspaceId/files/:fileId/versions', () => {
     it('should return 401 if unauthorized', async () => {
@@ -136,6 +139,26 @@ describe('Workspace File Version Routes', () => {
   });
 
   describe('POST /api/workspaces/:workspaceId/files/:fileId/versions/:versionId/restore', () => {
+    it('rejects a viewer attempting to restore workspace content', async () => {
+      vi.mocked(prisma.workspaceMember.findUnique).mockResolvedValue({ role: 'VIEWER' } as any);
+      vi.mocked(prisma.fileSystemItem.findUnique).mockResolvedValue({ id: 'file-1', workspaceId: 'ws-123', type: 'FILE' } as any);
+      const res = await request(app)
+        .post('/api/workspaces/ws-123/files/file-1/versions/v-1/restore')
+        .set('Authorization', `Bearer ${accessToken}`);
+      expect(res.status).toBe(403);
+      expect(prisma.fileSystemItem.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a file belonging to a different workspace', async () => {
+      vi.mocked(prisma.workspaceMember.findUnique).mockResolvedValue({ role: 'EDITOR' } as any);
+      vi.mocked(prisma.fileSystemItem.findUnique).mockResolvedValue({ id: 'file-1', workspaceId: 'other-workspace', type: 'FILE' } as any);
+      const res = await request(app)
+        .post('/api/workspaces/ws-123/files/file-1/versions/v-1/restore')
+        .set('Authorization', `Bearer ${accessToken}`);
+      expect(res.status).toBe(404);
+      expect(prisma.fileSystemItem.update).not.toHaveBeenCalled();
+    });
+
     it('should restore version content back to file', async () => {
       vi.mocked(prisma.workspaceMember.findUnique).mockResolvedValue({
         id: 'member-1',

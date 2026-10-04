@@ -8,9 +8,11 @@ export class TerminalManager {
   private inputBuffer = '';
   private onInputSubmit?: (data: string) => void;
   private onRawDataCallback?: (data: string) => void;
+  private onResizeCallback?: (size: { cols: number; rows: number }) => void;
   private isRawMode = false;
-  private isWaitingForInput = false;
   private resizeObserver: ResizeObserver | null = null;
+  private fitFrame: number | null = null;
+  private disposed = false;
 
   constructor(container: HTMLElement) {
     this.terminal = new Terminal({
@@ -43,90 +45,130 @@ export class TerminalManager {
     this.terminal.open(container);
 
     // Delay fit to ensure container has dimensions
-    requestAnimationFrame(() => {
-      try { this.fitAddon.fit(); } catch {}
-    });
+    this.scheduleFit();
 
-    // Handle user keyboard input for stdin (line-buffered for code execution)
-    this.terminal.onKey(({ key, domEvent }) => {
-      // If we are passing raw data, let the PTY handle everything (no local echo/buffering)
-      if (this.isRawMode) return;
-
-      if (domEvent.key === 'Enter') {
-        this.terminal.write('\r\n');
-        const input = this.inputBuffer + '\n';
-        this.inputBuffer = '';
-        this.onInputSubmit?.(input);
-      } else if (domEvent.key === 'Backspace') {
-        if (this.inputBuffer.length > 0) {
-          this.inputBuffer = this.inputBuffer.slice(0, -1);
-          this.terminal.write('\b \b');
-        }
-      } else if (key.length === 1 && !domEvent.ctrlKey && !domEvent.altKey && !domEvent.metaKey) {
-        this.inputBuffer += key;
-        this.terminal.write(key);
-      }
-    });
-
-    // Handle raw data for PTY
+    // onData includes paste, IME and keyboard input. PTYs receive the original
+    // bytes so shells, Ctrl+C, completion and full-screen programs work normally.
     this.terminal.onData((data) => {
+      if (this.disposed || this.terminal.options.disableStdin) return;
       if (this.isRawMode) {
         this.onRawDataCallback?.(data);
+        return;
       }
+
+      // Browser/local code runners consume lines rather than a PTY. Strip
+      // terminal key sequences (including bracketed-paste markers), not text.
+      // eslint-disable-next-line no-control-regex -- ANSI key sequences start with ESC.
+      const text = data.replace(/\x1b(?:\[[0-?]*[ -/]*[@-~]|O[@-~])/g, '').replace(/\r\n/g, '\n');
+      for (const character of text) {
+        if (character === '\r' || character === '\n') {
+          this.terminal.write('\r\n');
+          const input = this.inputBuffer + '\n';
+          this.inputBuffer = '';
+          this.onInputSubmit?.(input);
+        } else if (character === '\x7f' || character === '\b') {
+          if (this.inputBuffer.length > 0) {
+            this.inputBuffer = Array.from(this.inputBuffer).slice(0, -1).join('');
+            this.terminal.write('\b \b');
+          }
+        } else if (character >= ' ' || character === '\t') {
+          this.inputBuffer += character;
+          this.terminal.write(character);
+        }
+      }
+    });
+
+    this.terminal.onResize((size) => {
+      if (!this.disposed) this.onResizeCallback?.(size);
     });
 
     // Auto-resize on container resize
     this.resizeObserver = new ResizeObserver(() => {
-      try { this.fitAddon.fit(); } catch {}
+      this.scheduleFit();
     });
     this.resizeObserver.observe(container);
   }
 
   writeStdout(data: string) {
+    if (this.disposed) return;
+    // xterm follows new output when already at the bottom and preserves the
+    // viewport when the user scrolls back to inspect earlier output.
     this.terminal.write(data);
-    this.terminal.scrollToBottom();
   }
 
   writeStderr(data: string) {
+    if (this.disposed) return;
     // Red color for stderr
     this.terminal.write(`\x1b[31m${data}\x1b[0m`);
-    this.terminal.scrollToBottom();
   }
 
   writeInfo(data: string) {
+    if (this.disposed) return;
     // Cyan color for info
     this.terminal.write(`\x1b[36m${data}\x1b[0m`);
-    this.terminal.scrollToBottom();
   }
 
   onData(callback: (input: string) => void) {
     this.onInputSubmit = callback;
+    return () => { if (this.onInputSubmit === callback) this.onInputSubmit = undefined; };
   }
 
   onRawData(callback: (data: string) => void) {
     this.onRawDataCallback = callback;
+    return () => { if (this.onRawDataCallback === callback) this.onRawDataCallback = undefined; };
+  }
+
+  onResize(callback: (size: { cols: number; rows: number }) => void) {
+    this.onResizeCallback = callback;
+    return () => { if (this.onResizeCallback === callback) this.onResizeCallback = undefined; };
+  }
+
+  getDimensions() {
+    return { cols: this.terminal.cols, rows: this.terminal.rows };
+  }
+
+  setInputEnabled(enabled: boolean) {
+    if (!this.disposed) this.terminal.options.disableStdin = !enabled;
   }
 
   setRawMode(raw: boolean) {
+    if (this.isRawMode !== raw) this.inputBuffer = '';
     this.isRawMode = raw;
   }
 
   clear() {
+    if (this.disposed) return;
     this.terminal.clear();
     this.terminal.write('\x1b[2J\x1b[H');
     this.inputBuffer = '';
   }
 
   dispose() {
+    if (this.disposed) return;
+    this.disposed = true;
+    if (this.fitFrame !== null) cancelAnimationFrame(this.fitFrame);
+    this.fitFrame = null;
+    this.onInputSubmit = undefined;
+    this.onRawDataCallback = undefined;
+    this.onResizeCallback = undefined;
     this.resizeObserver?.disconnect();
     this.terminal.dispose();
   }
 
   focus() {
-    this.terminal.focus();
+    if (!this.disposed) this.terminal.focus();
+  }
+
+  private scheduleFit() {
+    if (this.disposed || this.fitFrame !== null) return;
+    this.fitFrame = requestAnimationFrame(() => {
+      this.fitFrame = null;
+      this.fit();
+    });
   }
 
   fit() {
-    try { this.fitAddon.fit(); } catch {}
+    if (this.disposed) return;
+    try { this.fitAddon.fit(); } catch { /* container not laid out yet; fit retried on next resize */ }
   }
 }

@@ -5,7 +5,32 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Gate the force-push on a green build so a failing commit never reaches the
+  # live Space. The verify job mirrors ci.yml's checks.
+  verify:
+    name: Build, lint & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run db:generate --workspace=apps/server
+      - run: npm run lint
+      - run: npm run build
+      - run: npm test
+      - name: Build and test native sandbox
+        run: |
+          docker build --target sandbox-toolchain -t syncscript-sandbox-test .
+          docker run --rm -v "$PWD/apps/server/sandbox:/tests:ro" syncscript-sandbox-test python3 /tests/smoke.py --launcher /syncscript-sandbox --rootfs /rootfs
+          docker build -t syncscript-api-test .
+          docker run --rm -v "$PWD/apps/server/sandbox:/tests:ro" syncscript-api-test node /tests/adapter-smoke.cjs /app/apps/server/dist/execution/localWorkspaceRuntime.js
+          sh apps/server/sandbox/api-smoke.sh syncscript-api-test
+
   sync:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

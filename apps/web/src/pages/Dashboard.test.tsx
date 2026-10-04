@@ -4,6 +4,13 @@ import React from 'react';
 import { Dashboard } from './Dashboard';
 import { useAuth } from '../context/AuthContext';
 
+// Dashboard navigates with useNavigate; mock it so renders do not require a
+// full Router and so we can assert the navigation target directly.
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', () => ({
+  useNavigate: () => mockNavigate,
+}));
+
 // Mock AuthContext
 vi.mock('../context/AuthContext', () => {
   const mockUser = { id: 'user-123', email: 'user@example.com', name: 'User One' };
@@ -21,18 +28,6 @@ vi.mock('../context/AuthContext', () => {
       apiClient: mockApiClient,
     }),
     AuthProvider: ({ children }: any) => <div>{children}</div>,
-  };
-});
-
-// Mock WorkspaceDetail to isolate Dashboard unit tests
-vi.mock('../components/WorkspaceDetail', () => {
-  return {
-    WorkspaceDetail: ({ workspaceId, onBack }: any) => (
-      <div data-testid="workspace-detail-view">
-        <span>Workspace ID: {workspaceId}</span>
-        <button onClick={onBack}>Back Button</button>
-      </div>
-    ),
   };
 });
 
@@ -147,7 +142,7 @@ describe('Dashboard Workspace Flow', () => {
     });
   });
 
-  it('switches to WorkspaceDetail view on workspace item card click', async () => {
+  it('navigates to the workspace route on workspace item card click', async () => {
     const mockWorkspaces = [
       {
         id: 'ws-select',
@@ -172,21 +167,8 @@ describe('Dashboard Workspace Flow', () => {
     const card = screen.getByText('Workspace Alpha');
     fireEvent.click(card);
 
-    // Verify detail view rendered
-    expect(screen.getByTestId('workspace-detail-view')).toBeInTheDocument();
-    expect(screen.getByText('Workspace ID: ws-select')).toBeInTheDocument();
-
-    // Click Back
-    const backBtn = screen.getByRole('button', { name: /Back Button/i });
-    fireEvent.click(backBtn);
-
-    // Back to main view
-    await waitFor(() => {
-      expect(screen.queryByTestId('workspace-detail-view')).not.toBeInTheDocument();
-    });
-    
-    await waitFor(() => {
-      expect(screen.getByText('Workspace Alpha')).toBeInTheDocument();
-    });
+    // Current Dashboard navigates to the workspace route rather than rendering
+    // an inline detail view.
+    expect(mockNavigate).toHaveBeenCalledWith('/workspace/ws-select');
   });
 });

@@ -2,9 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { createHash } from 'node:crypto';
 import { createApp } from '../app.js';
 import { config } from '../config/index.js';
 import prisma from '../lib/prisma.js';
+import { sendEmail } from '../utils/mailer.js';
+
+vi.mock('../utils/mailer.js', () => ({ sendEmail: vi.fn().mockResolvedValue(true) }));
 
 // Mock the entire prisma client module
 vi.mock('../lib/prisma.js', () => {
@@ -17,7 +21,7 @@ vi.mock('../lib/prisma.js', () => {
       },
       refreshToken: {
         create: vi.fn(),
-        findUnique: vi.fn(),
+        findFirst: vi.fn(),
         delete: vi.fn(),
         deleteMany: vi.fn(),
       },
@@ -31,6 +35,7 @@ const app = createApp();
 describe('Auth Routes', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.mocked(sendEmail).mockResolvedValue(true);
   });
 
   describe('POST /api/auth/register', () => {
@@ -158,6 +163,34 @@ describe('Auth Routes', () => {
       const cookies = response.headers['set-cookie'];
       const cookieArray = Array.isArray(cookies) ? cookies : typeof cookies === 'string' ? [cookies] : [];
       expect(cookieArray.some((cookie: string) => cookie.includes('refreshToken'))).toBe(true);
+      const refreshCookie = cookieArray.find((cookie: string) => cookie.startsWith('refreshToken='))!;
+      const refreshToken = decodeURIComponent(refreshCookie.split(';')[0].slice('refreshToken='.length));
+      expect(prisma.refreshToken.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({ tokenHash: createHash('sha256').update(refreshToken).digest('hex') }),
+      });
+      expect(vi.mocked(prisma.refreshToken.create).mock.calls[0][0].data).not.toHaveProperty('token');
+    });
+
+    it('creates distinct refresh sessions for simultaneous logins by the same account', async () => {
+      const loginData = { email: 'test@example.com', password: 'password123' };
+      vi.mocked(prisma.user.findUnique).mockResolvedValue({
+        id: 'user-id-123', email: loginData.email, name: 'Test User',
+        passwordHash: await bcrypt.hash(loginData.password, 6), isVerified: true,
+      } as any);
+      vi.mocked(prisma.refreshToken.create).mockResolvedValue({} as any);
+      const now = Date.now();
+      const clock = vi.spyOn(Date, 'now').mockReturnValue(now);
+      try {
+        const responses = await Promise.all([
+          request(app).post('/api/auth/login').send(loginData),
+          request(app).post('/api/auth/login').send(loginData),
+        ]);
+        expect(responses.map(response => response.status)).toEqual([200, 200]);
+        const hashes = vi.mocked(prisma.refreshToken.create).mock.calls.map(([args]) => args.data.tokenHash);
+        expect(hashes[0]).toMatch(/^[a-f0-9]{64}$/);
+        expect(hashes[1]).toMatch(/^[a-f0-9]{64}$/);
+        expect(hashes[0]).not.toBe(hashes[1]);
+      } finally { clock.mockRestore(); }
     });
 
     it('should fail login if password is incorrect', async () => {
@@ -210,9 +243,9 @@ describe('Auth Routes', () => {
       const expiresAt = new Date();
       expiresAt.setDate(expiresAt.getDate() + 7);
 
-      vi.mocked(prisma.refreshToken.findUnique).mockResolvedValue({
+      vi.mocked(prisma.refreshToken.findFirst).mockResolvedValue({
         id: 'token-id',
-        token: mockRefreshToken,
+        tokenHash: createHash('sha256').update(mockRefreshToken).digest('hex'),
         userId: mockUser.id,
         revoked: false,
         expiresAt,
@@ -228,6 +261,11 @@ describe('Auth Routes', () => {
       expect(response.status).toBe(200);
       expect(response.body.success).toBe(true);
       expect(response.body.data.accessToken).toBeDefined();
+      expect(prisma.refreshToken.findFirst).toHaveBeenCalledWith({
+        where: { tokenHash: createHash('sha256').update(mockRefreshToken).digest('hex') },
+        include: { user: true },
+      });
+      expect(vi.mocked(prisma.refreshToken.create).mock.calls[0][0].data.tokenHash).toMatch(/^[a-f0-9]{64}$/);
     });
 
     it('should reject refresh if token is expired or revoked', async () => {
@@ -239,9 +277,9 @@ describe('Auth Routes', () => {
       const expiredDate = new Date();
       expiredDate.setDate(expiredDate.getDate() - 1); // yesterday
 
-      vi.mocked(prisma.refreshToken.findUnique).mockResolvedValue({
+      vi.mocked(prisma.refreshToken.findFirst).mockResolvedValue({
         id: 'token-id',
-        token: mockRefreshToken,
+        tokenHash: createHash('sha256').update(mockRefreshToken).digest('hex'),
         userId: mockUser.id,
         revoked: false,
         expiresAt: expiredDate,
@@ -264,7 +302,9 @@ describe('Auth Routes', () => {
         .set('Cookie', ['refreshToken=token-to-logout']);
 
       expect(response.status).toBe(200);
-      expect(prisma.refreshToken.deleteMany).toHaveBeenCalled();
+      expect(prisma.refreshToken.deleteMany).toHaveBeenCalledWith({
+        where: { tokenHash: createHash('sha256').update('token-to-logout').digest('hex') },
+      });
     });
   });
 

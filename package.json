@@ -31,5 +31,8 @@
   "packageManager": "npm@11.11.0",
   "dependencies": {
     "@21st-extension/toolbar": "^0.5.14"
+  },
+  "overrides": {
+    "dompurify": "3.4.16"
   }
 }

@@ -1,6 +1,8 @@
 import { PrismaClient } from '../generated/client/index.js';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { config } from '../config/index.js';
+import { contentStorageFromEnv } from './d1ContentStore.js';
+import { contentStorageExtension } from './contentStorageExtension.js';
 
 // Pass PoolConfig to PrismaPg — it creates its own Pool internally.
 // We pass ssl: { rejectUnauthorized: false } to handle Supabase certs,
@@ -18,7 +20,9 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-export const prisma =
+// Raw client is reserved for migration tooling. Application code must use the
+// extended client so D1 references are resolved before content reaches callers.
+export const prismaMetadata =
   globalForPrisma.prisma ??
   new PrismaClient({
     adapter,
@@ -26,7 +30,9 @@ export const prisma =
   });
 
 if (process.env.NODE_ENV !== 'production') {
-  globalForPrisma.prisma = prisma;
+  globalForPrisma.prisma = prismaMetadata;
 }
+
+export const prisma = prismaMetadata.$extends(contentStorageExtension(contentStorageFromEnv()));
 
 export default prisma;

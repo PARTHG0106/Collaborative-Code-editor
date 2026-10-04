@@ -8,7 +8,7 @@ interface SnapshotsPanelProps {
   loading: boolean;
   actionLoading: boolean;
   onCreateSnapshot: () => void;
-  onPreview: (content: string) => void;
+  onPreview: (versionId: string) => void;
   onRestore: (versionId: string) => void;
 }
 
@@ -53,7 +53,7 @@ export const SnapshotsPanel: React.FC<SnapshotsPanelProps> = ({
               </div>
               <div className="ide-snapshot-author">By {v.user?.name || 'System'}</div>
               <div className="ide-snapshot-actions">
-                <button className="ide-btn" style={{ flex: 1, fontSize: 10, padding: '3px 6px' }} onClick={() => onPreview(v.content)}>
+                <button className="ide-btn" style={{ flex: 1, fontSize: 10, padding: '3px 6px' }} onClick={() => onPreview(v.id)}>
                   View
                 </button>
                 <button className="ide-btn primary" style={{ flex: 1, fontSize: 10, padding: '3px 6px' }} onClick={() => onRestore(v.id)} disabled={actionLoading}>

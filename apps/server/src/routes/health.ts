@@ -10,12 +10,14 @@ const router = Router();
  * otherwise invisible from outside, which makes it impossible to tell whether a
  * browser symptom is coming from old code still in service.
  */
-const BUILD_MARKER = 'explicit-preflight-handler';
+const BUILD_MARKER = 'isolated-workspace-terminal-d1';
 
 /** Reflects the fix under investigation, which cannot be observed via GET. */
 const FEATURES = {
   explicitPreflightHandler: true,
   normalizedOriginMatching: true,
+  isolatedWorkspaceTerminal: true,
+  optionalD1ContentStorage: true,
 };
 
 /**

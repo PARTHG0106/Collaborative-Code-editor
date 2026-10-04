@@ -83,6 +83,48 @@
   --ring: #4f5d4e;
 }
 
+.dark {
+  --bg-primary: #0F172A;
+  --bg-secondary: #1E293B;
+  --bg-tertiary: #334155;
+  --bg-glass: rgba(30, 41, 59, 0.7);
+  --border-glass: rgba(248, 250, 252, 0.08);
+
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --text-muted: #64748B;
+
+  --accent-primary: #22C55E;
+  --accent-secondary: #16A34A;
+  --accent-primary-rgb: 34, 197, 94;
+  --accent-secondary-rgb: 22, 163, 74;
+  --accent-gradient: linear-gradient(135deg, #22C55E 0%, #16A34A 100%);
+  --accent-success: #22C55E;
+  --accent-warning: #EAB308;
+  --accent-danger: #EF4444;
+
+  --shadow-glow: 0 4px 20px rgba(34, 197, 94, 0.15);
+
+  --background: #0F172A;
+  --foreground: #F8FAFC;
+  --card: #1E293B;
+  --card-foreground: #F8FAFC;
+  --popover: #1E293B;
+  --popover-foreground: #F8FAFC;
+  --primary: #22C55E;
+  --primary-foreground: #0F172A;
+  --secondary: #334155;
+  --secondary-foreground: #F8FAFC;
+  --muted: #334155;
+  --muted-foreground: #94A3B8;
+  --accent: #334155;
+  --accent-foreground: #F8FAFC;
+  --destructive: #EF4444;
+  --border: #475569;
+  --input: #475569;
+  --ring: #22C55E;
+}
+
 /* Tailwind base styles layer adjustments */
 @layer base {
   * {

@@ -128,6 +128,10 @@ Required Space configuration:
 - **Secrets**: `DATABASE_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `HF_TOKEN`, `SMTP_PASS`
 - **Variables**: `CORS_ORIGINS`, and `ENABLE_TERMINAL` only if the interactive terminal is wanted
 
+For the current terminal sandbox, Cloudflare D1 settings and migration steps,
+see [the existing Space deployment guide](docs/existing-space-deployment.md).
+Keep the existing Space on the Docker SDK; the Static SDK cannot run this backend.
+
 ---
 
 ## 🧪 Testing

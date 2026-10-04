@@ -24,23 +24,23 @@
 }
 
 .ide-root.ide-dark {
-  --ide-bg: #161817;
-  --ide-surface: #1C1F1D;
-  --ide-activity-bar: #181A19;
-  --ide-sidebar: #1C1F1D;
-  --ide-editor-bg: #111312;
-  --ide-border: #313634;
-  --ide-text: #F5F5F2;
-  --ide-text-secondary: #A0A6A3;
-  --ide-text-muted: #7B817D;
-  --ide-accent: #7B917F;
-  --ide-accent-hover: #8EA793;
-  --ide-hover: rgba(123,145,127,0.12);
-  --ide-selected: #2A312D;
-  --ide-success: #5E8B68;
-  --ide-warning: #B19764;
-  --ide-danger: #B56A6A;
-  --ide-online: #6F9A74;
+  --ide-bg: #0F172A;
+  --ide-surface: #1E293B;
+  --ide-activity-bar: #0F172A;
+  --ide-sidebar: #1E293B;
+  --ide-editor-bg: #0B1120;
+  --ide-border: #334155;
+  --ide-text: #F8FAFC;
+  --ide-text-secondary: #94A3B8;
+  --ide-text-muted: #64748B;
+  --ide-accent: #22C55E;
+  --ide-accent-hover: #16A34A;
+  --ide-hover: rgba(51, 65, 85, 0.5);
+  --ide-selected: #334155;
+  --ide-success: #22C55E;
+  --ide-warning: #EAB308;
+  --ide-danger: #EF4444;
+  --ide-online: #22C55E;
 }
 
 /* ===== Layout Shell ===== */

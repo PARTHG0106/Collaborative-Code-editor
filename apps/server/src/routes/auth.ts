@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
-import { randomInt } from 'crypto';
+import { createHash, randomInt, randomUUID } from 'crypto';
 import { z } from 'zod';
 import prisma from '../lib/prisma.js';
 import { config } from '../config/index.js';
@@ -134,7 +134,12 @@ function generateAccessToken(user: { id: string; email: string; name: string }):
 function generateRefreshToken(userId: string): string {
   return jwt.sign({ userId }, config.jwt.refreshSecret, {
     expiresIn: config.jwt.refreshExpiry as any,
+    jwtid: randomUUID(),
   });
+}
+
+function hashRefreshToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
 }
 
 /**
@@ -346,7 +351,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
     // Save refresh token to database
     await prisma.refreshToken.create({
       data: {
-        token: refreshToken,
+        tokenHash: hashRefreshToken(refreshToken),
         userId: user.id,
         expiresAt,
       },
@@ -422,8 +427,8 @@ router.post('/refresh', async (req: Request, res: Response) => {
     }
 
     // Find and validate token in database
-    const dbToken = await prisma.refreshToken.findUnique({
-      where: { token },
+    const dbToken = await prisma.refreshToken.findFirst({
+      where: { tokenHash: hashRefreshToken(token) },
       include: { user: true },
     });
 
@@ -460,7 +465,7 @@ router.post('/refresh', async (req: Request, res: Response) => {
       prisma.refreshToken.delete({ where: { id: dbToken.id } }),
       prisma.refreshToken.create({
         data: {
-          token: newRefreshToken,
+          tokenHash: hashRefreshToken(newRefreshToken),
           userId: dbToken.user.id,
           expiresAt,
         },
@@ -508,7 +513,7 @@ router.post('/logout', async (req: Request, res: Response) => {
     if (token) {
       // Delete token from database (revoke it)
       await prisma.refreshToken.deleteMany({
-        where: { token },
+        where: { tokenHash: hashRefreshToken(token) },
       });
     }
 
@@ -676,7 +681,7 @@ router.post('/verify', verifyLimiter, async (req: Request, res: Response) => {
     // Save refresh token to database
     await prisma.refreshToken.create({
       data: {
-        token: refreshToken,
+        tokenHash: hashRefreshToken(refreshToken),
         userId: user.id,
         expiresAt,
       },

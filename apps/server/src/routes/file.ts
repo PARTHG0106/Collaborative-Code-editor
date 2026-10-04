@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma.js';
 import { requireAuth } from '../middleware/auth.js';
 import { requireWorkspaceRole, WorkspaceRequest } from '../middleware/workspace.js';
+import { broadcastWorkspaceFilesChanged, forgetActiveFiles, getActiveFileContent, replaceFileContent, updateActiveFileName } from '../socket.js';
+import { invalidateAuthz } from '../lib/socketAuthz.js';
 
 const router = Router({ mergeParams: true });
 
@@ -50,7 +52,7 @@ router.get(
 
       return res.status(200).json({
         success: true,
-        data: items,
+        data: items.map(item => ({ ...item, content: getActiveFileContent(item.id) ?? item.content })),
       });
     } catch (error) {
       next(error);
@@ -117,6 +119,7 @@ router.post(
           content: body.type === 'FILE' ? (body.content || '') : null,
         },
       });
+      broadcastWorkspaceFilesChanged(workspaceId);
 
       return res.status(201).json({
         success: true,
@@ -170,7 +173,6 @@ router.patch(
       }
 
       // If renaming, ensure name is not taken in the same directory
-      let newName = item.name;
       if (body.name && body.name.toLowerCase() !== item.name.toLowerCase()) {
         const existing = await prisma.fileSystemItem.findFirst({
           where: {
@@ -187,17 +189,19 @@ router.patch(
             error: { message: `An item named '${body.name}' already exists in this folder` },
           });
         }
-        newName = body.name;
       }
 
-      // Update
-      const updated = await prisma.fileSystemItem.update({
-        where: { id },
-        data: {
-          name: newName,
-          content: body.content !== undefined ? body.content : item.content,
-        },
-      });
+      // A rename must never write the content read above: socket persistence
+      // may have saved a newer document while the name check was in progress.
+      let updated = item;
+      if (body.name !== undefined) {
+        updated = await prisma.fileSystemItem.update({ where: { id }, data: { name: body.name } });
+        updateActiveFileName(id, body.name);
+      }
+      if (body.content !== undefined) {
+        updated = await replaceFileContent(id, workspaceId, body.content ?? '', req.user!.id);
+      }
+      broadcastWorkspaceFilesChanged(workspaceId);
 
       return res.status(200).json({
         success: true,
@@ -241,10 +245,28 @@ router.delete(
         });
       }
 
+      const deletedIds = new Set([id]);
+      if (item.type === 'FOLDER') {
+        const descendants = await prisma.fileSystemItem.findMany({ where: { workspaceId }, select: { id: true, parentId: true } });
+        let grew = true;
+        while (grew) {
+          grew = false;
+          for (const child of descendants) {
+            if (child.parentId && deletedIds.has(child.parentId) && !deletedIds.has(child.id)) {
+              deletedIds.add(child.id);
+              grew = true;
+            }
+          }
+        }
+      }
+
       // Delete the item (cascades automatically to all children in DB due to onDelete: Cascade)
       await prisma.fileSystemItem.delete({
         where: { id },
       });
+      forgetActiveFiles([...deletedIds]);
+      for (const fileId of deletedIds) invalidateAuthz({ fileId });
+      broadcastWorkspaceFilesChanged(workspaceId);
 
       return res.status(200).json({
         success: true,

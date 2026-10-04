@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Play, Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
 import Editor from '@monaco-editor/react';
+import DOMPurify from 'dompurify';
 
 export interface CellOutput {
   type: 'stdout' | 'stderr' | 'display_data' | 'execute_result' | 'error';
@@ -27,11 +28,12 @@ interface NotebookRendererProps {
   onDeleteCell: (id: string) => void;
   onMoveCell: (id: string, direction: 'up' | 'down') => void;
   theme: 'dark' | 'light';
+  readOnly?: boolean;
 }
 
 export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
   cells, onCellChange, onRunCell, onRunAll,
-  onAddCell, onDeleteCell, onMoveCell, theme,
+  onAddCell, onDeleteCell, onMoveCell, theme, readOnly = false,
 }) => {
   const [focusedCell, setFocusedCell] = useState<string | null>(null);
 
@@ -46,16 +48,16 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
         background: 'var(--ide-surface)', border: '1px solid var(--ide-border)',
         position: 'sticky', top: 0, zIndex: 10
       }}>
-        <button className="ide-btn" onClick={onRunAll}
+        <button disabled={readOnly} className="ide-btn" onClick={onRunAll}
           style={{ display: 'flex', alignItems: 'center', gap: '4px', height: '28px', padding: '0 12px' }}>
           <Play size={12} /> Run All
         </button>
-        <button className="ide-btn"
+        <button disabled={readOnly} className="ide-btn"
           style={{ display: 'flex', alignItems: 'center', gap: '4px', height: '28px', padding: '0 12px', background: 'transparent', border: '1px solid var(--ide-border)' }}
           onClick={() => onAddCell(cells[cells.length - 1]?.id || '', 'code')}>
           <Plus size={12} /> Code
         </button>
-        <button className="ide-btn"
+        <button disabled={readOnly} className="ide-btn"
           style={{ display: 'flex', alignItems: 'center', gap: '4px', height: '28px', padding: '0 12px', background: 'transparent', border: '1px solid var(--ide-border)' }}
           onClick={() => onAddCell(cells[cells.length - 1]?.id || '', 'markdown')}>
           <Plus size={12} /> Markdown
@@ -94,19 +96,19 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
             <div style={{ flex: 1 }} />
             {cell.type === 'code' && (
               <button className="ide-icon-btn" onClick={(e) => { e.stopPropagation(); onRunCell(cell.id); }}
-                disabled={cell.isRunning}
+                disabled={readOnly || cell.isRunning}
                 title="Run cell"
                 style={{ marginRight: '4px', color: cell.isRunning ? 'var(--ide-accent)' : undefined }}>
                 {cell.isRunning ? <span style={{ animation: 'pulse 1s infinite' }}>⏳</span> : <Play size={12} />}
               </button>
             )}
-            <button className="ide-icon-btn" onClick={(e) => { e.stopPropagation(); onMoveCell(cell.id, 'up'); }} title="Move up">
+            <button disabled={readOnly} className="ide-icon-btn" onClick={(e) => { e.stopPropagation(); onMoveCell(cell.id, 'up'); }} title="Move up">
               <ChevronUp size={12} />
             </button>
-            <button className="ide-icon-btn" onClick={(e) => { e.stopPropagation(); onMoveCell(cell.id, 'down'); }} title="Move down">
+            <button disabled={readOnly} className="ide-icon-btn" onClick={(e) => { e.stopPropagation(); onMoveCell(cell.id, 'down'); }} title="Move down">
               <ChevronDown size={12} />
             </button>
-            <button className="ide-icon-btn" onClick={(e) => { e.stopPropagation(); onDeleteCell(cell.id); }} title="Delete cell"
+            <button disabled={readOnly} className="ide-icon-btn" onClick={(e) => { e.stopPropagation(); onDeleteCell(cell.id); }} title="Delete cell"
               style={{ color: 'var(--ide-danger)' }}>
               <Trash2 size={12} />
             </button>
@@ -119,8 +121,9 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
               language={cell.type === 'code' ? 'python' : 'markdown'}
               theme={theme === 'dark' ? 'vs-dark' : 'vs'}
               value={cell.source}
-              onChange={(val) => onCellChange(cell.id, val || '')}
+              onChange={(val) => { if (!readOnly) onCellChange(cell.id, val || ''); }}
               options={{
+                readOnly,
                 minimap: { enabled: false }, lineNumbers: 'off',
                 scrollBeyondLastLine: false, folding: false,
                 fontSize: 13, padding: { top: 0, bottom: 0 },
@@ -160,7 +163,7 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
                       alt="output" style={{ maxWidth: '100%', background: '#fff' }} />
                   )}
                   {output.type === 'display_data' && output.data?.['text/html'] && (
-                    <div dangerouslySetInnerHTML={{ __html: output.data['text/html'] }}
+                    <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(output.data['text/html'], { USE_PROFILES: { html: true } }) }}
                       style={{ background: '#fff', color: '#000', padding: '8px' }} />
                   )}
                 </div>

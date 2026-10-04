@@ -13,10 +13,11 @@
     "clean": "rimraf dist",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
+    "db:deploy": "node scripts/deploy-migrations.cjs",
     "db:push": "prisma db push",
     "db:studio": "prisma studio",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "d1:content": "tsx scripts/d1-content.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
@@ -32,7 +33,7 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.3",
     "morgan": "^1.10.0",
-    "nodemailer": "^9.0.1",
+    "nodemailer": "^10.0.14",
     "pg": "^8.11.5",
     "socket.io": "^4.8.3",
     "zod": "^3.23.8"
@@ -43,6 +44,7 @@
   "devDependencies": {
     "@collab/eslint-config": "*",
     "@collab/typescript-config": "*",
+    "@electric-sql/pglite": "0.4.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.17",

@@ -13,3 +13,10 @@ yarn-debug.log*
 yarn-error.log*
 *.log
 apps/server/src/generated
+
+# Keep runtime secrets out of every image layer, including local builds.
+**/.env
+**/.env.*
+cloudflared1cred.txt
+.agents
+.claude

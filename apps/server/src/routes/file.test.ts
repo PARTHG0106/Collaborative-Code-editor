@@ -1,9 +1,10 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import jwt from 'jsonwebtoken';
 import { createApp } from '../app.js';
 import { config } from '../config/index.js';
 import prisma from '../lib/prisma.js';
+import { forgetActiveFiles } from '../socket.js';
 
 vi.mock('../lib/prisma.js', () => {
   const mockPrisma = {
@@ -42,6 +43,8 @@ describe('File System Routes', () => {
   beforeEach(() => {
     vi.resetAllMocks();
   });
+
+  afterEach(() => forgetActiveFiles(['file-1']));
 
   describe('GET /api/workspaces/:workspaceId/files', () => {
     it('should return 401 if unauthorized', async () => {
@@ -197,6 +200,22 @@ describe('File System Routes', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.data.name).toBe('new.js');
+      expect(prisma.fileSystemItem.update).toHaveBeenCalledWith({ where: { id: 'file-1' }, data: { name: 'new.js' } });
+    });
+
+    it('applies a case-only rename without rewriting file content', async () => {
+      vi.mocked(prisma.workspaceMember.findUnique).mockResolvedValue({ role: 'EDITOR' } as any);
+      vi.mocked(prisma.fileSystemItem.findUnique).mockResolvedValue({
+        id: 'file-1', name: 'main.js', type: 'FILE', parentId: null, workspaceId: 'ws-123', content: 'stale read',
+      } as any);
+      vi.mocked(prisma.fileSystemItem.update).mockResolvedValue({ id: 'file-1', name: 'Main.js', content: 'latest edits' } as any);
+      const res = await request(app)
+        .patch('/api/workspaces/ws-123/files/file-1')
+        .set('Authorization', `Bearer ${accessToken}`)
+        .send({ name: 'Main.js' });
+      expect(res.status).toBe(200);
+      expect(prisma.fileSystemItem.update).toHaveBeenCalledWith({ where: { id: 'file-1' }, data: { name: 'Main.js' } });
+      expect(res.body.data.content).toBe('latest edits');
     });
 
     it('should update file content successfully', async () => {

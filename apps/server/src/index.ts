@@ -164,7 +164,11 @@ async function main(): Promise<void> {
     process.on('SIGINT', () => shutdown('SIGINT'));
   } catch (error) {
     console.error('❌ Failed to start server:', error);
-    try { await prisma.$disconnect(); } catch {}
+    try {
+      await prisma.$disconnect();
+    } catch {
+      // Already disconnected or never connected; nothing to clean up.
+    }
     process.exit(1);
   }
 }

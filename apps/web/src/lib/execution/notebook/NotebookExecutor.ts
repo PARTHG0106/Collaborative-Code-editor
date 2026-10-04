@@ -8,7 +8,7 @@ export function parseNotebook(json: string): NotebookCell[] {
     const cells = nb.cells || [];
 
     return cells.map((cell: any, i: number) => ({
-      id: `cell-${i}-${Date.now()}`,
+      id: typeof cell.id === 'string' ? cell.id : `cell-${i}`,
       type: cell.cell_type === 'code' ? 'code' : 'markdown',
       source: Array.isArray(cell.source) ? cell.source.join('') : (cell.source || ''),
       outputs: (cell.outputs || []).map((o: any) => parseOutput(o)),
@@ -46,6 +46,7 @@ export function serializeNotebook(cells: NotebookCell[]): string {
     nbformat: 4, nbformat_minor: 5,
     metadata: { kernelspec: { display_name: 'Python 3', language: 'python', name: 'python3' } },
     cells: cells.map(c => ({
+      id: c.id,
       cell_type: c.type,
       source: c.source.split('\n').map((l, i, arr) => i === arr.length - 1 ? l : l + '\n'),
       metadata: {},
@@ -80,6 +81,8 @@ export class NotebookKernel {
 
     await this.runtime.execute(cell.source, {
       onStdout: (data) => {
+        // Strip ANSI color codes; the \x1b control char is intentional here.
+        // eslint-disable-next-line no-control-regex
         const cleanData = data.replace(/\x1b\[[0-9;]*m/g, '');
         if (!cleanData || cleanData.includes('[Python ready]') || cleanData.includes('Loading Python') || cleanData.includes('Initializing Python')) return;
         const last = outputs[outputs.length - 1];
@@ -91,6 +94,7 @@ export class NotebookKernel {
         onOutput([...outputs]);
       },
       onStderr: (data) => {
+        // eslint-disable-next-line no-control-regex
         const cleanData = data.replace(/\x1b\[[0-9;]*m/g, '');
         if (!cleanData) return;
         const last = outputs[outputs.length - 1];

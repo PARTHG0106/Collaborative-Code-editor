@@ -111,7 +111,8 @@ export const ExplorerPanel: React.FC<ExplorerPanelProps> = ({
 
   const handleFolderUpload = async () => {
     try {
-      // @ts-ignore
+      // showDirectoryPicker is not yet in the TS DOM lib across all targets.
+      // @ts-expect-error - File System Access API, not in the DOM typings here
       const dirHandle = await window.showDirectoryPicker();
       await processDirectoryHandle(dirHandle, getActiveFolderId());
     } catch (err) {
