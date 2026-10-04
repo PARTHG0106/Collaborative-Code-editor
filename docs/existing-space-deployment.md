@@ -86,3 +86,18 @@ installations and applies committed migrations. It never uses
 `db push --accept-data-loss`. See [database deployment](database-deployment.md)
 if preflight reports an incompatible schema. `DIRECT_URL` is optional when a
 direct PostgreSQL connection is needed for migrations.
+
+## Release verification and remaining dependency work
+
+Reload existing editor tabs after the backend and frontend releases complete,
+so every collaborator uses the updated editing protocol and recovery behavior.
+
+The October 4, 2026 dependency audit reports six production-tree advisories:
+four high findings in Prisma's CLI/config dependency tree and two moderate
+findings in React Router. This app uses PostgreSQL rather than the affected
+MySQL transport, static Prisma configuration, and client-side routes with
+application-owned destinations. The full development audit also flags Vitest's
+UI server; tests use `vitest run`, and the deployment does not start that server.
+These findings remain dependency-upgrade work; passing the release checks is
+not a claim of a clean dependency audit. The suggested major-version changes
+need a separate compatibility check.
