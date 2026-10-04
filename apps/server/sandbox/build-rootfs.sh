@@ -27,9 +27,9 @@ printf 'root:x:0:0:root:/:/bin/bash\n' > "$destination/etc/passwd"
 printf 'root:x:0:\n' > "$destination/etc/group"
 printf 'passwd: files\ngroup: files\nhosts: files\n' > "$destination/etc/nsswitch.conf"
 printf '127.0.0.1 localhost\n::1 localhost\n' > "$destination/etc/hosts"
-for device in null zero random urandom tty; do
-  cp -a "/dev/$device" "$destination/dev/$device"
-done
+# RUN containers on managed builders may deny mknod. Dockerfile ADD extracts
+# the verified device archive through BuildKit's image file operation instead.
+# Keep this directory empty until that operation; no runtime mknod is needed.
 
 # setuid/setgid files are unnecessary and cannot grant privilege after the
 # launcher's no_new_privs. Strip their bits as an additional invariant.

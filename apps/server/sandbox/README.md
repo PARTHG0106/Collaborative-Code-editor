@@ -6,6 +6,18 @@ root-owned immutable toolchain and writable `/workspace` and `/tmp` directories.
 No `/app`, `/proc`, `/sys`, home directories, backend environment or inherited
 file descriptors are included. A bare `cd` returns to `/workspace`.
 
+Managed builders and runtimes may deny `mknod`. The rootfs build script leaves
+`/dev` empty, then Dockerfile `ADD` extracts a verified deterministic archive
+containing only `null`, `zero`, `random`, `urandom`, and `tty`. BuildKit performs
+that image file operation outside its restricted `RUN` container. Runtime jail
+copies hard-link those existing nodes; no runtime `mknod`, mounts, or host
+directory links are needed. Verify or regenerate the archive with:
+
+```sh
+python3 apps/server/sandbox/device-nodes.py --verify
+python3 apps/server/sandbox/device-nodes.py
+```
+
 The root-only native launcher enters the jail before dropping all supplementary
 groups, UID/GID privileges, capabilities and the capability bounding set. It
 enables `no_new_privs` and a syscall filter, then runs the requested executable

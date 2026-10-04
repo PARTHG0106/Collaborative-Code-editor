@@ -20,6 +20,11 @@ RUN rm /usr/local/bin/tsx && install -m 755 /build/tsx-offline.sh /usr/local/bin
 COPY apps/workspace-runtime/safe-files.py /usr/local/lib/syncscript/safe-files.py
 COPY apps/server/sandbox/build-rootfs.sh /build/build-rootfs.sh
 RUN sh /build/build-rootfs.sh /rootfs
+COPY apps/server/sandbox/device-nodes.py apps/server/sandbox/devices.tar /build/
+RUN python3 /build/device-nodes.py --verify /build/devices.tar
+# BuildKit extracts the five verified device headers outside the restricted
+# RUN container. Neither image RUN steps nor the Space runtime need mknod.
+ADD apps/server/sandbox/devices.tar /rootfs/dev/
 
 FROM node:20-slim
 RUN apt-get update -y && apt-get install -y --no-install-recommends openssl ca-certificates \
