@@ -47,8 +47,7 @@ async function openTerminal(socket, workspaceId) {
     const cleanup = () => { clearTimeout(timer); socket.off('terminal:ready', ready); socket.off('terminal:error', error); };
     const ready = value => { if (value.workspaceId === workspaceId) { cleanup(); resolve(); } };
     const error = value => { if (value.workspaceId === workspaceId) { cleanup(); reject(new Error(`Terminal failed: ${value.message}`)); } };
-    // First use can copy immutable image-layer files into the container's
-    // writable layer before hard links are reusable, especially on CI disks.
+    // Allow cold CI hosts time for workspace provisioning and initial DB sync.
     const timer = setTimeout(() => { cleanup(); reject(new Error('Terminal did not become ready')); }, 300000);
     socket.on('terminal:ready', ready);
     socket.on('terminal:error', error);
@@ -156,8 +155,8 @@ const db = new Client({ connectionString: databaseUrl });
 
   await openTerminal(a, workspaceA);
   await openTerminal(b, workspaceB);
-  const listing = await shell(a, workspaceA, "cd; pwd; ls; ls /; [ ! -e /app ] && [ ! -e /var/lib/syncscript ] && printf '\\nNO_API_%s\\n' FILES", '\r\nNO_API_FILES\r\n');
-  assert(listing.includes('/workspace') && listing.includes('main.py') && listing.includes('usr'));
+  const listing = await shell(a, workspaceA, "cd; pwd; ls; if ls /app >/dev/null 2>&1; then false; else printf '\\nNO_API_%s\\n' FILES; fi", '\r\nNO_API_FILES\r\n');
+  assert(listing.includes('/workspace') && listing.includes('main.py'));
   const injected = [];
   const inspectA = value => { if (value.workspaceId === workspaceA && value.data.includes('INJECTION_MARKER')) injected.push(value.data); };
   a.on('terminal:output', inspectA);
@@ -165,7 +164,7 @@ const db = new Client({ connectionString: databaseUrl });
   await delay(250);
   assert.equal(injected.length, 0);
   a.off('terminal:output', inspectA);
-  const aCode = 'import os,socket\nassert "DATABASE_URL" not in os.environ\nassert "JWT_ACCESS_SECRET" not in os.environ\nassert not os.path.exists("/app")\ntry:\n socket.socket()\n raise RuntimeError("network unexpectedly permitted")\nexcept PermissionError:\n print("NETWORK_BLOCKED",flush=True)\nprint("INPUT_READY",flush=True)\nprint("ANSWER_A:"+input())';
+  const aCode = 'import os,socket\nassert "DATABASE_URL" not in os.environ\nassert "JWT_ACCESS_SECRET" not in os.environ\nassert os.getcwd() == os.environ["HOME"]\nfor action in [lambda: open("/app/package.json").read(), lambda: os.listdir("/app")]:\n try:\n  action()\n  raise RuntimeError("backend file unexpectedly accessible")\n except PermissionError:\n  pass\nwith open("/dev/null","wb") as target: target.write(b"discarded")\nwith open("/dev/zero","rb") as source: assert source.read(16) == bytes(16)\ntry:\n socket.socket()\n raise RuntimeError("network unexpectedly permitted")\nexcept PermissionError:\n print("NETWORK_BLOCKED",flush=True)\nprint("INPUT_READY",flush=True)\nprint("ANSWER_A:"+input())';
   const [runA, runB] = await Promise.all([
     execute(a, workspaceA, files[0].id, aCode, 'synthetic-answer'),
     execute(b, workspaceB, files[1].id, 'print("ONLY_WORKSPACE_B")'),
@@ -178,7 +177,7 @@ const db = new Client({ connectionString: databaseUrl });
   const runs = (await db.query('SELECT id,status,exit_code,user_id FROM execution_sessions WHERE id = ANY($1::text[])', [[runA.sessionId, runB.sessionId]])).rows;
   assert.equal(runs.length, 2);
   assert(runs.every(row => row.status === 'COMPLETED' && row.exit_code === 0));
-  console.log('PASS real cd/ls/root listing, isolated terminal input/output, denied network and concurrent Python/stdin execution');
+  console.log('PASS real cd/ls, denied backend content/listing, isolated terminal input/output, safe devices and concurrent Python/stdin execution');
 
   await shell(a, workspaceA, "printf 'TERMINAL_ONLY_EDIT\\n' > main.py; printf '\\nEDIT_%s\\n' READY", '\r\nEDIT_READY\r\n');
   const backupNotice = event(a, 'terminal:output', value => value.workspaceId === workspaceA && value.data.includes('main.py.syncscript-backup-'));

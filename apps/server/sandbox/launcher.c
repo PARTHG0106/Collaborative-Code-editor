@@ -1,10 +1,13 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
+#include <glob.h>
 #include <grp.h>
+#include <limits.h>
 #include <linux/audit.h>
 #include <linux/capability.h>
 #include <linux/filter.h>
+#include <linux/landlock.h>
 #include <linux/sched.h>
 #include <linux/seccomp.h>
 #include <signal.h>
@@ -19,10 +22,11 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/sysmacros.h>
 #include <unistd.h>
 
-/* Root-only launcher for an offline, single-workspace chroot. No shell parser,
- * host mounts, backend environment, or inherited descriptors enter the jail. */
+/* Root-only launcher for an offline, single-workspace Landlock domain. No shell
+ * parser, host mounts, backend environment, or inherited descriptors are used. */
 static void fail(const char *operation) {
   fprintf(stderr, "Sandbox unavailable (%s): %s\n", operation, strerror(errno));
   exit(126);
@@ -37,8 +41,8 @@ static unsigned int identity(const char *value) {
   char *end = NULL;
   errno = 0;
   unsigned long parsed = strtoul(value, &end, 10);
-  if (errno || !value[0] || !end || *end || parsed < 200000 || parsed > 2147483646UL)
-    reject("workspace identities must be integers from 200000 to 2147483646");
+  if (errno || !value[0] || !end || *end || parsed < 10000 || parsed >= 60000UL)
+    reject("workspace identities must be integers from 10000 to 59999");
   return (unsigned int) parsed;
 }
 
@@ -59,6 +63,122 @@ static void drop_identity(unsigned int uid, unsigned int gid) {
   struct __user_cap_data_struct capabilities[2] = {{0}, {0}};
   if (syscall(SYS_capset, &header, &capabilities) != 0) fail("drop capabilities");
   if (prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0) fail("process boundary");
+}
+
+/* These rights were introduced after the minimum build headers in Debian.
+ * Only include them in the ruleset when the running kernel supports them. */
+#ifndef LANDLOCK_ACCESS_FS_TRUNCATE
+#define LANDLOCK_ACCESS_FS_TRUNCATE (1ULL << 14)
+#endif
+#ifndef LANDLOCK_ACCESS_FS_IOCTL_DEV
+#define LANDLOCK_ACCESS_FS_IOCTL_DEV (1ULL << 15)
+#endif
+
+static void allow_fd(int ruleset, int fd, uint64_t rights) {
+  const struct landlock_path_beneath_attr rule = { .allowed_access = rights, .parent_fd = fd };
+  if (syscall(SYS_landlock_add_rule, ruleset, LANDLOCK_RULE_PATH_BENEATH, &rule, 0) != 0)
+    fail("Landlock path rule");
+}
+
+static void allow_public_path(int ruleset, const char *name, int optional) {
+  int fd = open(name, O_PATH | O_CLOEXEC);
+  if (fd < 0) {
+    if (optional && errno == ENOENT) return;
+    fail("open public toolchain path");
+  }
+  struct stat metadata;
+  if (fstat(fd, &metadata) != 0) fail("public toolchain metadata");
+  if (metadata.st_uid != 0 || (metadata.st_mode & 0022) ||
+      (!S_ISDIR(metadata.st_mode) && !S_ISREG(metadata.st_mode)))
+    reject("public toolchain paths must be root-owned and not writable by other users");
+  uint64_t rights = LANDLOCK_ACCESS_FS_READ_FILE;
+  if (S_ISDIR(metadata.st_mode)) rights |= LANDLOCK_ACCESS_FS_READ_DIR | LANDLOCK_ACCESS_FS_EXECUTE;
+  allow_fd(ruleset, fd, rights);
+  close(fd);
+}
+
+static void allow_configuration_glob(int ruleset, const char *pattern) {
+  glob_t paths = {0};
+  int result = glob(pattern, GLOB_NOSORT, NULL, &paths);
+  if (result != 0 && result != GLOB_NOMATCH) reject("cannot inspect public runtime configuration");
+  for (size_t index = 0; index < paths.gl_pathc; index++)
+    allow_public_path(ruleset, paths.gl_pathv[index], 0);
+  globfree(&paths);
+}
+
+static void restrict_filesystem(int workspace_fd, int temporary_fd) {
+  int abi = (int) syscall(SYS_landlock_create_ruleset, NULL, 0, LANDLOCK_CREATE_RULESET_VERSION);
+  if (abi < 3) reject("Landlock ABI 3 or newer is required; no unsandboxed fallback is available");
+  uint64_t handled = LANDLOCK_ACCESS_FS_EXECUTE | LANDLOCK_ACCESS_FS_WRITE_FILE |
+    LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_READ_DIR |
+    LANDLOCK_ACCESS_FS_REMOVE_DIR | LANDLOCK_ACCESS_FS_REMOVE_FILE |
+    LANDLOCK_ACCESS_FS_MAKE_CHAR | LANDLOCK_ACCESS_FS_MAKE_DIR |
+    LANDLOCK_ACCESS_FS_MAKE_REG | LANDLOCK_ACCESS_FS_MAKE_SOCK |
+    LANDLOCK_ACCESS_FS_MAKE_FIFO | LANDLOCK_ACCESS_FS_MAKE_BLOCK |
+    LANDLOCK_ACCESS_FS_MAKE_SYM | LANDLOCK_ACCESS_FS_REFER | LANDLOCK_ACCESS_FS_TRUNCATE;
+  if (abi >= 5) handled |= LANDLOCK_ACCESS_FS_IOCTL_DEV;
+  const struct landlock_ruleset_attr policy = { .handled_access_fs = handled };
+  int ruleset = (int) syscall(SYS_landlock_create_ruleset, &policy, sizeof(policy), 0);
+  if (ruleset < 0) fail("create Landlock ruleset");
+  const uint64_t writable = handled & ~(LANDLOCK_ACCESS_FS_MAKE_CHAR |
+    LANDLOCK_ACCESS_FS_MAKE_BLOCK | LANDLOCK_ACCESS_FS_IOCTL_DEV);
+  allow_fd(ruleset, workspace_fd, writable);
+  allow_fd(ruleset, temporary_fd, writable);
+
+  allow_public_path(ruleset, "/usr", 0);
+  static const char *configuration[] = {
+    "/etc/alternatives", "/etc/ssl/certs", "/etc/ssl/openssl.cnf", "/etc/ld.so.cache", "/etc/ld.so.conf",
+    "/etc/ld.so.conf.d", "/etc/passwd", "/etc/group", "/etc/nsswitch.conf",
+    "/etc/hosts", "/etc/gitconfig", "/etc/ca-certificates.conf", "/etc/debian_version", "/etc/mime.types",
+  };
+  for (size_t index = 0; index < sizeof(configuration) / sizeof(configuration[0]); index++)
+    allow_public_path(ruleset, configuration[index], 1);
+  allow_configuration_glob(ruleset, "/etc/java-*");
+  allow_configuration_glob(ruleset, "/etc/python*");
+
+  int device_directory = open("/dev", O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  struct stat device_metadata;
+  if (device_directory < 0 || fstat(device_directory, &device_metadata) != 0) fail("open trusted device directory");
+  if (device_metadata.st_uid != 0 || (device_metadata.st_mode & 0022))
+    reject("device directory must be root-owned and not writable by other users");
+  static const struct { const char *name; unsigned int major, minor; } devices[] = {
+    {"null", 1, 3}, {"zero", 1, 5}, {"random", 1, 8},
+    {"urandom", 1, 9}, {"tty", 5, 0},
+  };
+  for (size_t index = 0; index < sizeof(devices) / sizeof(devices[0]); index++) {
+    int fd = openat(device_directory, devices[index].name, O_PATH | O_NOFOLLOW | O_CLOEXEC);
+    struct stat metadata;
+    if (fd < 0 || fstat(fd, &metadata) != 0) fail("open approved device");
+    /* User-namespaced hosts expose bind-mounted host devices as overflow UID
+     * 65534. No workspace may receive that identity. The trusted /dev parent,
+     * non-following open, exact node numbers and mode prevent substitutions. */
+    if (!S_ISCHR(metadata.st_mode) || (metadata.st_uid != 0 && metadata.st_uid != 65534) ||
+        (metadata.st_mode & 07777) != 0666 ||
+        metadata.st_rdev != makedev(devices[index].major, devices[index].minor))
+      reject("approved device paths must be the expected character nodes with trusted ownership and mode 0666");
+    uint64_t rights = LANDLOCK_ACCESS_FS_READ_FILE | LANDLOCK_ACCESS_FS_WRITE_FILE;
+    if (abi >= 5) rights |= LANDLOCK_ACCESS_FS_IOCTL_DEV;
+    allow_fd(ruleset, fd, rights);
+    close(fd);
+  }
+  close(device_directory);
+  if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0) fail("Landlock no_new_privs");
+  if (syscall(SYS_landlock_restrict_self, ruleset, 0) != 0) fail("enforce Landlock ruleset");
+  close(ruleset);
+}
+
+static int owned_leaf(int root_fd, const char *name, unsigned int uid, unsigned int gid) {
+  int fd = openat(root_fd, name, O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  struct stat metadata;
+  if (fd < 0 || fstat(fd, &metadata) != 0) fail("open workspace writable directory");
+  if (metadata.st_uid != uid || metadata.st_gid != gid || (metadata.st_mode & 07777) != 0700)
+    reject("writable directories must belong to the workspace UID/GID with mode 0700");
+  return fd;
+}
+
+static int beneath(const char *name, const char *parent) {
+  size_t length = strlen(parent);
+  return strncmp(name, parent, length) == 0 && (name[length] == '/' || name[length] == '\0');
 }
 
 #define DENY(number) \
@@ -198,7 +318,7 @@ static void restrict_syscalls(void) {
 }
 
 int main(int argc, char **argv) {
-  const char *root = NULL, *cwd = "/workspace";
+  const char *root = NULL, *cwd = NULL;
   unsigned int uid = 0, gid = 0;
   int command = 0, kill_workspace = 0;
   pid_t process_group = 0;
@@ -231,17 +351,29 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (process_group) reject("--process-group requires --kill-workspace");
-  if (!root || root[0] != '/' || !uid || gid != uid || !command || command >= argc || argv[command][0] != '/' || cwd[0] != '/')
+  if (!root || root[0] != '/' || !uid || gid != uid || !command || command >= argc || argv[command][0] != '/' || (cwd && cwd[0] != '/'))
     reject("expected --root PATH --uid UID --gid UID --cwd PATH -- /absolute/command");
 
   int root_fd = open(root, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-  if (root_fd < 0) fail("open jail root");
+  if (root_fd < 0) fail("open workspace root");
   struct stat metadata;
-  if (fstat(root_fd, &metadata) != 0) fail("jail metadata");
-  if (metadata.st_uid != 0 || (metadata.st_mode & 0022)) reject("jail root must be root-owned and not writable by other users");
-  if (fchdir(root_fd) != 0 || chroot(".") != 0 || chdir(cwd) != 0) fail("filesystem boundary");
+  if (fstat(root_fd, &metadata) != 0) fail("workspace root metadata");
+  if (metadata.st_uid != 0 || (metadata.st_mode & 0022)) reject("workspace root must be root-owned and not writable by other users");
+  int workspace_fd = owned_leaf(root_fd, "workspace", uid, gid);
+  int temporary_fd = owned_leaf(root_fd, "tmp", uid, gid);
+  char canonical_root[PATH_MAX], workspace[PATH_MAX], temporary[PATH_MAX], canonical_cwd[PATH_MAX];
+  if (!realpath(root, canonical_root)) fail("resolve workspace root");
+  if (snprintf(workspace, sizeof(workspace), "%s/workspace", canonical_root) >= (int) sizeof(workspace) ||
+      snprintf(temporary, sizeof(temporary), "%s/tmp", canonical_root) >= (int) sizeof(temporary))
+    reject("workspace path is too long");
+  if (!realpath(cwd ? cwd : workspace, canonical_cwd)) fail("resolve workspace cwd");
+  if (!beneath(canonical_cwd, workspace) && !beneath(canonical_cwd, temporary))
+    reject("cwd must remain within this workspace or its temporary directory");
+  if (chdir(canonical_cwd) != 0) fail("workspace cwd");
+  restrict_filesystem(workspace_fd, temporary_fd);
 
-  /* No descriptor into the API filesystem or its sockets may survive chroot. */
+  /* Already-open descriptors bypass Landlock path checks, so none from the
+   * API filesystem or its sockets may survive beyond standard PTY/pipes. */
 #ifdef __NR_close_range
   if (syscall(__NR_close_range, 3U, ~0U, 0U) != 0) {
     if (errno != ENOSYS) fail("close inherited descriptors");
@@ -254,13 +386,16 @@ int main(int argc, char **argv) {
 #endif
 
   if (clearenv() != 0) fail("clear environment");
+  char java_options[PATH_MAX + 256];
+  if (snprintf(java_options, sizeof(java_options), "-Xmx256m -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:CompressedClassSpaceSize=64m -XX:ActiveProcessorCount=2 -Djava.io.tmpdir=%s", temporary) >= (int) sizeof(java_options))
+    reject("Java temporary path is too long");
   if (setenv("PATH", "/usr/local/bin:/usr/bin:/bin", 1) ||
-      setenv("HOME", "/workspace", 1) || setenv("PWD", cwd, 1) ||
-      setenv("TMPDIR", "/tmp", 1) || setenv("TERM", "xterm-256color", 1) ||
+      setenv("HOME", workspace, 1) || setenv("PWD", canonical_cwd, 1) ||
+      setenv("TMPDIR", temporary, 1) || setenv("TERM", "xterm-256color", 1) ||
       setenv("LANG", "C.UTF-8", 1) || setenv("SHELL", "/bin/bash", 1) ||
       setenv("PS1", "\\w\\$ ", 1) || setenv("PYTHONUNBUFFERED", "1", 1) ||
       setenv("NODE_OPTIONS", "--max-old-space-size=256 --disable-wasm-trap-handler", 1) ||
-      setenv("JAVA_TOOL_OPTIONS", "-Xmx256m -XX:MaxMetaspaceSize=192m -XX:ReservedCodeCacheSize=64m -XX:CompressedClassSpaceSize=64m -XX:ActiveProcessorCount=2", 1))
+      setenv("JAVA_TOOL_OPTIONS", java_options, 1))
     fail("safe environment");
 
   limit(RLIMIT_CORE, 0);

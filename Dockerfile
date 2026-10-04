@@ -9,33 +9,23 @@ RUN cp -r apps/server/src/generated apps/server/dist/generated
 
 FROM node:20-bookworm-slim AS sandbox-toolchain
 RUN apt-get update -y && apt-get install -y --no-install-recommends \
-    bash ca-certificates curl git gcc g++ make default-jdk-headless \
+    bash openssl ca-certificates curl git gcc g++ make default-jdk-headless \
     python3 python3-venv python3-pip nano less procps unzip zip \
     && rm -rf /var/lib/apt/lists/* \
     && npm install --global tsx typescript
 COPY apps/server/sandbox/launcher.c /build/launcher.c
-RUN gcc -O2 -std=c11 -Wall -Wextra -Werror /build/launcher.c -o /syncscript-sandbox
+RUN gcc -O2 -std=c11 -Wall -Wextra -Werror /build/launcher.c -o /usr/local/bin/syncscript-sandbox
 COPY apps/server/sandbox/tsx-offline.sh /build/tsx-offline.sh
 RUN rm /usr/local/bin/tsx && install -m 755 /build/tsx-offline.sh /usr/local/bin/tsx
 COPY apps/workspace-runtime/safe-files.py /usr/local/lib/syncscript/safe-files.py
-COPY apps/server/sandbox/build-rootfs.sh /build/build-rootfs.sh
-RUN sh /build/build-rootfs.sh /rootfs
-COPY apps/server/sandbox/device-nodes.py apps/server/sandbox/devices.tar /build/
-RUN python3 /build/device-nodes.py --verify /build/devices.tar
-# BuildKit extracts the five verified device headers outside the restricted
-# RUN container. Neither image RUN steps nor the Space runtime need mknod.
-ADD apps/server/sandbox/devices.tar /rootfs/dev/
+RUN find /usr -perm /6000 -exec chmod a-s {} + \
+    && chmod -R a-w /usr
 
-FROM node:20-slim
-RUN apt-get update -y && apt-get install -y --no-install-recommends openssl ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+FROM sandbox-toolchain
 WORKDIR /app
 COPY --from=builder /app ./
-COPY --from=sandbox-toolchain /syncscript-sandbox /usr/local/bin/syncscript-sandbox
-COPY --from=sandbox-toolchain /rootfs /opt/syncscript/rootfs
-RUN chmod 755 /usr/local/bin/syncscript-sandbox \
-    && mkdir -p /var/lib/syncscript/workspaces \
-    && chmod 700 /var/lib/syncscript/workspaces
+RUN mkdir -p /var/lib/syncscript/workspaces \
+    && chmod 711 /var/lib/syncscript /var/lib/syncscript/workspaces
 EXPOSE 7860
 ENV PORT=7860
 ENV RUNTIME_PROVIDER=local

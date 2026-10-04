@@ -43,12 +43,12 @@ async function shell(runtime, terminalId, command, expected) {
   ], preserveExisting: true });
   await first.request('terminal:spawn', { terminalId: 'term-a', cols: 120, rows: 30 });
   await shell(first, 'term-a', "printf '\\nPTY_%s\\n' OK", '\r\nPTY_OK\r\n');
-  await shell(first, 'term-a', "[ ! -e /adapter-host-marker ] && printf '\\nBOUNDARY_%s\\n' OK", '\r\nBOUNDARY_OK\r\n');
-  const boundary = await run(first, 'boundary-run', 'python', 'import os,socket\nassert "SYNCSCRIPT_TEST_HOST_SECRET" not in os.environ\nassert not os.path.exists("/adapter-host-marker")\ntry:\n socket.socket()\n raise RuntimeError("network unexpectedly allowed")\nexcept PermissionError:\n print("NETWORK_BLOCKED")\nprint(os.getuid())\n', 'boundary.py');
+  await shell(first, 'term-a', "if cat /adapter-host-marker >/dev/null 2>&1; then false; else printf '\\nBOUNDARY_%s\\n' OK; fi", '\r\nBOUNDARY_OK\r\n');
+  const boundary = await run(first, 'boundary-run', 'python', 'import os,socket\nassert "SYNCSCRIPT_TEST_HOST_SECRET" not in os.environ\nassert os.getcwd() == os.environ["HOME"]\nfor action in [lambda: open("/adapter-host-marker").read(), lambda: os.listdir("/app")]:\n try:\n  action()\n  raise RuntimeError("backend file unexpectedly accessible")\n except PermissionError:\n  pass\ntry:\n socket.socket()\n raise RuntimeError("network unexpectedly allowed")\nexcept PermissionError:\n print("NETWORK_BLOCKED")\nprint(os.getuid())\n', 'boundary.py');
   assert.match(boundary, /NETWORK_BLOCKED/);
   const uidA = Number(boundary.trim().split('\n').at(-1));
-  assert(uidA >= 200000);
-  console.log('PASS actual PTY, chroot, environment clearing and network block');
+  assert(uidA >= 10000 && uidA < 60000);
+  console.log('PASS actual PTY, Landlock file isolation, environment clearing and network block');
 
   assert.match(await run(first, 'imports', 'python', 'from helper import value\nprint(value)', 'pkg/main.py'), /42/);
   await shell(first, 'term-a', "cat pkg/main.py; printf '\\nSOURCE_%s\\n' DONE", 'original-source');
@@ -64,8 +64,8 @@ async function shell(runtime, terminalId, command, expected) {
   await first.request('write-file', { path: 'main.py', content: 'print("normal editor update")' });
   assert.equal(backups.size, 1, 'An unchanged editor inode should not create another backup when no process has it open');
   const writer = 'writer-' + Date.now();
-  const childCode = `import os,time\nf=open('/workspace/main.py','a')\nopen('/workspace/${writer}-ready','w').close()\nwhile not os.path.exists('/workspace/${writer}-go'): time.sleep(.01)\nf.write('\\nLATE_APPEND\\n'); f.flush(); f.close()\nopen('/workspace/${writer}-done','w').close()`;
-  const parentCode = `import subprocess,os,time\nsubprocess.Popen(['/usr/bin/python3','-c',${JSON.stringify(childCode)}],start_new_session=True,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\nwhile not os.path.exists('/workspace/${writer}-ready'): time.sleep(.01)\nprint('WRITER_READY')`;
+  const childCode = `import os,time\nf=open('main.py','a')\nopen('${writer}-ready','w').close()\nwhile not os.path.exists('${writer}-go'): time.sleep(.01)\nf.write('\\nLATE_APPEND\\n'); f.flush(); f.close()\nopen('${writer}-done','w').close()`;
+  const parentCode = `import subprocess,os,time\nsubprocess.Popen(['/usr/bin/python3','-c',${JSON.stringify(childCode)}],start_new_session=True,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)\nwhile not os.path.exists('${writer}-ready'): time.sleep(.01)\nprint('WRITER_READY')`;
   await run(first, 'held-writer', 'python', parentCode, 'holder.py');
   await first.request('write-file', { path: 'main.py', content: 'print("update while writer holds old inode")' });
   assert.equal(backups.size, 2, 'An open terminal writer must keep its displaced inode even when its initial hash matched');
@@ -75,7 +75,7 @@ async function shell(runtime, terminalId, command, expected) {
   await shell(first, 'term-a', `printf 'long terminal content' > '${longName}'; printf '\\nLONG_EDIT_%s\\n' DONE`, '\r\nLONG_EDIT_DONE\r\n');
   let longBackup;
   const captureLongBackup = data => {
-    const match = /Preserved terminal changes at \/workspace\/(.+) before updating/.exec(data.data);
+    const match = /Preserved terminal changes at \/var\/lib\/syncscript\/workspaces\/[a-f0-9]+\/workspace\/(.+) before updating/.exec(data.data);
     if (match) longBackup = match[1];
   };
   first.on('terminal-output', captureLongBackup);

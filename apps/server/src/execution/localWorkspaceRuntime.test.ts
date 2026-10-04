@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import fs from 'node:fs/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { allocateWorkspaceUid, getLocalRuntime, LOCAL_MIRROR_SCRIPT, LocalWorkspaceRuntime, workspaceJailKey } from './localWorkspaceRuntime.js';
 
@@ -32,7 +33,9 @@ const deferred = <T,>() => {
   return { promise, resolve };
 };
 const flush = async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); };
-const identity = { root: '/var/lib/syncscript/workspaces/trusted-hash', uid: 200000, gid: 200000 };
+const identity = { root: '/var/lib/syncscript/workspaces/trusted-hash', uid: 10000, gid: 10000 };
+const workspaceDirectory = identity.root + '/workspace';
+const temporaryDirectory = identity.root + '/tmp';
 
 describe('same-Space local sandbox runtime', () => {
   let runtime: LocalWorkspaceRuntime;
@@ -66,6 +69,9 @@ describe('same-Space local sandbox runtime', () => {
         if (args.includes(LOCAL_MIRROR_SCRIPT)) {
           child.stdout.write(JSON.stringify({ ok: true, backups: mirrorBackups, backupCount: mirrorBackups.length }));
           child.emit('close', 0, null);
+        } else if (args.some(arg => arg.includes('os.fwalk'))) {
+          child.stdout.write('{"bytes":0}');
+          child.emit('close', 0, null);
         } else if (args.includes('--kill-workspace') || args.includes('-c')) child.emit('close', 0, null);
         else if (args.includes('/usr/local/lib/syncscript/safe-files.py') && !holdFiles) finishHelper(child);
       });
@@ -80,7 +86,7 @@ describe('same-Space local sandbox runtime', () => {
     vi.stubEnv('HF_TOKEN', 'must-not-reach-shell');
     await runtime.request('terminal:spawn', { terminalId: 'terminal', cols: 120, rows: 40 });
     expect(ptySpawn).toHaveBeenCalledWith('/usr/local/bin/syncscript-sandbox', [
-      '--root', identity.root, '--uid', '200000', '--gid', '200000', '--cwd', '/workspace', '--', '/bin/bash', '--noprofile', '--norc', '-i',
+      '--root', identity.root, '--uid', '10000', '--gid', '10000', '--cwd', workspaceDirectory, '--', '/bin/bash', '--noprofile', '--norc', '-i',
     ], { name: 'xterm-256color', cols: 120, rows: 40, cwd: '/', env: { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' } });
     await runtime.request('terminal:data', { terminalId: 'terminal', data: '\x03\x1b[A\t' });
     expect(pty.write).toHaveBeenCalledWith('\x03\x1b[A\t');
@@ -89,11 +95,11 @@ describe('same-Space local sandbox runtime', () => {
     vi.unstubAllEnvs();
   });
 
-  it('runs all filesystem helpers unprivileged inside the jail and in isolated Python mode', async () => {
+  it('runs all filesystem helpers unprivileged with the actual workspace path and isolated Python mode', async () => {
     await runtime.request('sync', { files: [{ path: 'src/main.py', type: 'FILE', content: 'print(42)' }], preserveExisting: true });
     const helper = mirrors()[0];
     expect(command(helper)).toBe('/usr/bin/python3');
-    expect(helper.args.slice(-3)).toEqual(['-I', '-c', LOCAL_MIRROR_SCRIPT]);
+    expect(helper.args.slice(-4)).toEqual(['-I', '-c', LOCAL_MIRROR_SCRIPT, workspaceDirectory]);
     expect(JSON.parse(helper.input)).toEqual({ files: [{ path: 'src/main.py', type: 'FILE', content: 'print(42)' }], expected: { 'src/main.py': null } });
     expect(mocks.spawn.mock.calls.every(([file]) => file === '/usr/local/bin/syncscript-sandbox')).toBe(true);
     await expect(runtime.request('sync', { files: [{ path: '../outside', type: 'FILE', content: 'bad' }] })).rejects.toThrow('Invalid workspace file path');
@@ -120,10 +126,10 @@ describe('same-Space local sandbox runtime', () => {
     await runtime.request('sync', { files: [{ path: 'main.py', type: 'FILE', content: 'editor content' }] });
     expect(notice).not.toHaveBeenCalled();
     await runtime.request('terminal:spawn', { terminalId: 'terminal' });
-    expect(notice).toHaveBeenCalledWith({ terminalId: 'terminal', data: expect.stringContaining('/workspace/main.py.syncscript-backup-first') });
+    expect(notice).toHaveBeenCalledWith({ terminalId: 'terminal', data: expect.stringContaining(workspaceDirectory + '/main.py.syncscript-backup-first') });
     mirrorBackups = ['main.py.syncscript-backup-second'];
     await runtime.request('write-file', { path: 'main.py', content: 'new editor content' });
-    expect(notice).toHaveBeenLastCalledWith({ terminalId: 'terminal', data: expect.stringContaining('/workspace/main.py.syncscript-backup-second') });
+    expect(notice).toHaveBeenLastCalledWith({ terminalId: 'terminal', data: expect.stringContaining(workspaceDirectory + '/main.py.syncscript-backup-second') });
   });
 
   it('does not resurrect a terminal closed while the native PTY module is loading', async () => {
@@ -156,7 +162,7 @@ describe('same-Space local sandbox runtime', () => {
     expect(snapshot.path).toMatch(/^src\/\.syncscript-[a-f0-9-]+\.py$/);
     const process = stages()[0];
     expect(command(process)).toBe('/usr/bin/python3');
-    expect(process.args.at(-1)).toBe('/workspace/' + snapshot.path);
+    expect(process.args.at(-1)).toBe(workspaceDirectory + '/' + snapshot.path);
     expect(mocks.spawn.mock.calls.every(([file]) => file === '/usr/local/bin/syncscript-sandbox')).toBe(true);
     await runtime.request('execution:stdin', { executionId: 'run', data: 'answer\n' });
     expect(process.input).toBe('answer\n');
@@ -164,7 +170,10 @@ describe('same-Space local sandbox runtime', () => {
     await flush();
     const cleanup = children.find(child => child.args.includes('-c'))!;
     expect(cleanup.args).toContain('-I');
-    expect(cleanup.args).toContain('/workspace/' + snapshot.path);
+    expect(cleanup.args).toContain(workspaceDirectory + '/' + snapshot.path);
+    expect(fileHelpers()[0].args.at(-1)).toBe(temporaryDirectory);
+    expect(fileHelpers()[1].args.at(-1)).toBe(workspaceDirectory);
+    expect(cleanup.args.at(-2)).toMatch(new RegExp('^' + temporaryDirectory + '/run-[a-f0-9-]+$'));
   });
 
   it('cancels before file preparation completes without spawning user code', async () => {
@@ -179,13 +188,13 @@ describe('same-Space local sandbox runtime', () => {
     expect(fileHelpers()).toHaveLength(1);
   });
 
-  it('keeps compiler and program stages inside the same jail and does not start the next stage after cancellation', async () => {
+  it('keeps compiler and program stages inside the same workspace policy and does not start the next stage after cancellation', async () => {
     await runtime.request('execution:start', { executionId: 'cpp', language: 'cpp', code: 'int main(){}', path: 'src/main.cpp' });
     expect(command(stages()[0])).toBe('/usr/bin/g++');
     const compiler = stages()[0];
     compiler.emit('close', 0, null);
     await flush();
-    expect(command(stages()[1])).toMatch(/^\/tmp\/run-[a-f0-9-]+\/program$/);
+    expect(command(stages()[1])).toMatch(new RegExp('^' + temporaryDirectory + '/run-[a-f0-9-]+/program$'));
     await runtime.request('execution:cancel', { executionId: 'cpp' });
     expect(cleanupCalls().some(([, args]) => args.includes('--process-group') && args.includes(String(stages()[1].pid)))).toBe(true);
 
@@ -197,6 +206,24 @@ describe('same-Space local sandbox runtime', () => {
     expect(stages()).toHaveLength(3);
   });
 
+  it.each(['javascript', 'typescript', 'c', 'java'])('uses only actual identity directories when preparing %s execution', async language => {
+    const code = language === 'java' ? 'class Main { public static void main(String[] args) {} }' : 'source';
+    const filePath = language === 'java' ? 'src/Main.java' : 'src/main.txt';
+    await runtime.request('execution:start', { executionId: 'layout', language, code, path: filePath });
+    const stage = stages()[0];
+    expect(stage.args[stage.args.indexOf('--cwd') + 1]).toBe(workspaceDirectory);
+    expect(stage.args.some(arg => arg.startsWith(workspaceDirectory + '/src/.syncscript-'))).toBe(true);
+    expect(stage.args.some(arg => arg === '/workspace' || arg.startsWith('/workspace/') || arg === '/tmp' || arg.startsWith('/tmp/'))).toBe(false);
+    if (language === 'java') {
+      expect(stage.args[stage.args.indexOf('-sourcepath') + 1]).toBe(workspaceDirectory + '/src/');
+      expect(stage.args[stage.args.indexOf('-d') + 1]).toMatch(new RegExp('^' + temporaryDirectory + '/run-'));
+      expect(stage.args).toContain('-J-Djava.io.tmpdir=' + stage.args[stage.args.indexOf('-d') + 1]);
+      stage.emit('close', 0, null);
+      await flush();
+      expect(stages()[1].args).toContain('-Djava.io.tmpdir=' + stage.args[stage.args.indexOf('-d') + 1]);
+    }
+  });
+
   it('bounds output and runtime and uses kernel UID checks for cleanup signals', async () => {
     const exits = vi.fn();
     runtime.on('execution-exit', exits);
@@ -206,7 +233,7 @@ describe('same-Space local sandbox runtime', () => {
     await runtime.request('execution:start', { executionId: 'slow', language: 'python', code: 'while True: pass' });
     await vi.advanceTimersByTimeAsync(20_000);
     expect(exits).toHaveBeenCalledWith({ executionId: 'slow', exitCode: 124 });
-    expect(cleanupCalls().every(([, args]) => args.includes('--uid') && args.includes('200000'))).toBe(true);
+    expect(cleanupCalls().every(([, args]) => args.includes('--uid') && args.includes('10000'))).toBe(true);
   });
 
   it.each(['rss', 'disk', 'accounting'])('closes the entire UID sandbox on %s budget failure', async reason => {
@@ -220,6 +247,21 @@ describe('same-Space local sandbox runtime', () => {
     expect(disconnected).toHaveBeenCalledTimes(1);
     expect(cleanupCalls().some(([, args]) => !args.includes('--process-group'))).toBe(true);
     await expect(runtime.request('terminal:spawn', { terminalId: 'new' })).rejects.toThrow('closed');
+  });
+
+  it('accounts only for the actual workspace and private tmp paths under the sandbox policy', async () => {
+    await runtime.close();
+    runtime = new LocalWorkspaceRuntime('workspace', identity, { loadPty: async () => ptySpawn, idleMs: 1000, monitorMs: 100 });
+    const proc = vi.spyOn(fs, 'readdir').mockResolvedValue([] as never);
+    try {
+      await runtime.request('terminal:spawn', { terminalId: 'accounting' });
+      await vi.advanceTimersByTimeAsync(100);
+      const accounting = children.find(child => child.args.some(arg => arg.includes('os.fwalk')))!;
+      expect(accounting.args.slice(-2)).toEqual([workspaceDirectory, temporaryDirectory]);
+      expect(accounting.args[accounting.args.indexOf('--cwd') + 1]).toBe(workspaceDirectory);
+      expect(proc).toHaveBeenCalledWith('/proc');
+      expect(runtime.connected).toBe(true);
+    } finally { proc.mockRestore(); }
   });
 
   it('reserves startup slots before awaits and enforces concurrency and payload limits', async () => {
@@ -240,12 +282,31 @@ describe('same-Space local sandbox runtime', () => {
     expect(first).toMatch(/^[a-f0-9]{64}$/);
     expect(first).not.toContain('workspace-a');
     const registry = { version: 1 as const, workspaces: {} as Record<string, number> };
-    expect(allocateWorkspaceUid(registry, first)).toBe(200000);
-    expect(allocateWorkspaceUid(registry, second)).toBe(200001);
-    expect(allocateWorkspaceUid(JSON.parse(JSON.stringify(registry)), first)).toBe(200000);
-    expect(() => allocateWorkspaceUid({ version: 1, workspaces: { [first]: 200000, [second]: 200000 } }, first)).toThrow('duplicate');
+    expect(allocateWorkspaceUid(registry, first)).toBe(10000);
+    expect(allocateWorkspaceUid(registry, second)).toBe(10001);
+    expect(allocateWorkspaceUid(JSON.parse(JSON.stringify(registry)), first)).toBe(10000);
+    expect(() => allocateWorkspaceUid({ version: 1, workspaces: { [first]: 10000, [second]: 10000 } }, first)).toThrow('duplicate');
     expect(() => workspaceJailKey('../host')).toThrow('Invalid');
     expect(() => allocateWorkspaceUid(registry, '../outside')).toThrow('Invalid');
+  });
+
+  it.each([9999, 60000, 65534, 200000])('refuses out-of-range stored UID %i without assigning a replacement', uid => {
+    const key = workspaceJailKey('stored-workspace');
+    const registry = { version: 1 as const, workspaces: { [key]: uid } };
+    expect(() => allocateWorkspaceUid(registry, key)).toThrow('invalid or duplicate');
+    expect(registry.workspaces[key]).toBe(uid);
+    expect(() => new LocalWorkspaceRuntime('workspace', { ...identity, uid, gid: uid })).toThrow('Invalid local');
+  });
+
+  it('uses the final mapped UID once, then fails closed without recycling lower identities', () => {
+    const previous = workspaceJailKey('previous');
+    const last = workspaceJailKey('last');
+    const next = workspaceJailKey('next');
+    const registry = { version: 1 as const, workspaces: { [previous]: 59998 } };
+    expect(allocateWorkspaceUid(registry, last)).toBe(59999);
+    expect(() => allocateWorkspaceUid(registry, next)).toThrow('exhausted');
+    expect(Object.hasOwn(registry.workspaces, next)).toBe(false);
+    expect(allocateWorkspaceUid(registry, previous)).toBe(59998);
   });
 
   it('fails closed when the platform cannot provide the native sandbox', async () => {

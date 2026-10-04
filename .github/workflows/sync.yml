@@ -24,7 +24,7 @@ jobs:
       - name: Build and test native sandbox
         run: |
           docker build --target sandbox-toolchain -t syncscript-sandbox-test .
-          docker run --rm -v "$PWD/apps/server/sandbox:/tests:ro" syncscript-sandbox-test python3 /tests/smoke.py --launcher /syncscript-sandbox --rootfs /rootfs
+          docker run --rm --cap-drop=MKNOD --cap-drop=SYS_CHROOT -v "$PWD/apps/server/sandbox:/tests:ro" syncscript-sandbox-test python3 /tests/smoke.py --launcher /usr/local/bin/syncscript-sandbox
           docker build -t syncscript-api-test .
           docker run --rm -v "$PWD/apps/server/sandbox:/tests:ro" syncscript-api-test node /tests/adapter-smoke.cjs /app/apps/server/dist/execution/localWorkspaceRuntime.js
           sh apps/server/sandbox/api-smoke.sh syncscript-api-test

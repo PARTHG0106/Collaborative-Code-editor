@@ -42,7 +42,7 @@ jobs:
       - name: Build clean sandbox toolchain
         run: docker build --target sandbox-toolchain -t syncscript-sandbox-test .
       - name: Verify native isolation and language runtimes
-        run: docker run --rm -v "$PWD/apps/server/sandbox:/tests:ro" syncscript-sandbox-test python3 /tests/smoke.py --launcher /syncscript-sandbox --rootfs /rootfs
+        run: docker run --rm --cap-drop=MKNOD --cap-drop=SYS_CHROOT -v "$PWD/apps/server/sandbox:/tests:ro" syncscript-sandbox-test python3 /tests/smoke.py --launcher /usr/local/bin/syncscript-sandbox
       - name: Build and verify the complete API image
         run: |
           docker build -t syncscript-api-test .

@@ -6,14 +6,15 @@ import path from 'node:path';
 import type { RuntimeFile, WorkspaceRuntime } from './workspaceRuntime.js';
 
 const LAUNCHER = '/usr/local/bin/syncscript-sandbox';
-const ROOTFS = '/opt/syncscript/rootfs';
 const STATE = '/var/lib/syncscript/workspaces';
 const FILE_HELPER = '/usr/local/lib/syncscript/safe-files.py';
 const CLEAN_ENV = { PATH: '/usr/local/bin:/usr/bin:/bin', LANG: 'C.UTF-8' };
 const ID = /^[A-Za-z0-9_-]{1,128}$/;
-const MIN_UID = 200_000;
-const MAX_UID = 2_000_000_000;
-// Runs under the workspace UID, inside chroot, with Python -I. Atomic exchange
+// HF maps container UIDs 0..65535. Reserve a non-system range that fits that
+// mapping; invalid stored identities still fail closed instead of being reused.
+const MIN_UID = 10_000;
+const MAX_UID = 60_000;
+// Runs under the workspace UID and Landlock policy, with Python -I. Atomic exchange
 // retains the displaced inode until it is verified or named as a recovery copy.
 export const LOCAL_MIRROR_SCRIPT = String.raw`
 import ctypes, fcntl, hashlib, json, os, runpy, signal, stat, sys, uuid
@@ -103,12 +104,13 @@ def update(root, item, expected):
         os.close(parent)
 try:
     request = json.load(sys.stdin)
+    workspace = sys.argv[1]
     backups = []
     count = 0
     for item in request['files']:
-        if item['type'] == 'FOLDER': safe['apply']('/workspace', [item], True)
+        if item['type'] == 'FOLDER': safe['apply'](workspace, [item], True)
         else:
-            backup = update('/workspace', item, request.get('expected', {}).get(item['path']))
+            backup = update(workspace, item, request.get('expected', {}).get(item['path']))
             if backup:
                 count += 1
                 if len(backups) < 40: backups.append(backup)
@@ -184,7 +186,7 @@ function trustedCommand(command: string, args: string[]): Promise<void> {
   });
 }
 
-async function prepareIdentity(workspaceId: string): Promise<Identity> {
+export async function prepareIdentity(workspaceId: string): Promise<Identity> {
   if (process.platform !== 'linux' || process.getuid?.() !== 0) {
     throw new Error('The local workspace sandbox requires Linux and its root-owned OS launcher.');
   }
@@ -192,9 +194,15 @@ async function prepareIdentity(workspaceId: string): Promise<Identity> {
   if (!launcher.isFile() || launcher.isSymbolicLink() || launcher.uid !== 0 || (launcher.mode & 0o022) !== 0 || !(launcher.mode & 0o111)) {
     throw new Error('The OS sandbox launcher is missing or unsafe.');
   }
-  await trustedDirectory(ROOTFS);
-  await fs.mkdir(STATE, { recursive: true, mode: 0o700 });
-  for (const directory of ['/var', '/var/lib', '/var/lib/syncscript', STATE]) await trustedDirectory(directory);
+  for (const directory of ['/var', '/var/lib']) await trustedDirectory(directory);
+  for (const directory of ['/var/lib/syncscript', STATE]) {
+    await fs.mkdir(directory, { mode: 0o711 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+    await trustedDirectory(directory);
+    // Actual absolute workspace paths must be traversable after dropping UID.
+    // Search-only access exposes no directory listings; writable leaves remain
+    // private to their owner and Landlock grants access only to that identity.
+    await fs.chmod(directory, 0o711);
+  }
   const lock = path.join(STATE, '.allocation-lock');
   // Fail closed on another allocator or an interrupted allocation. A stale
   // lock can be reviewed by an operator; guessing could reuse a live UID.
@@ -223,11 +231,10 @@ async function prepareIdentity(workspaceId: string): Promise<Identity> {
     let exists = false;
     try { await fs.lstat(root); exists = true; } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
     if (!exists) {
-      // Only copy into a new root-owned staging directory. Never traverse an
-      // existing user-controlled workspace tree from the privileged broker.
+      // Shared tools stay in /usr. Create only the two writable leaves under
+      // a fresh root-owned staging directory, without traversing user trees.
       const staging = path.join(STATE, `.jail-${randomUUID()}`);
-      await fs.mkdir(staging, { mode: 0o755 });
-      await trustedCommand('/bin/cp', ['-al', ROOTFS + '/.', staging]);
+      await fs.mkdir(staging, { mode: 0o711 });
       for (const leaf of ['workspace', 'tmp']) {
         const directory = path.join(staging, leaf);
         await fs.mkdir(directory, { mode: 0o700 }).catch(error => { if (error.code !== 'EEXIST') throw error; });
@@ -288,6 +295,8 @@ export class LocalWorkspaceRuntime extends EventEmitter implements WorkspaceRunt
   private fileQueue: Promise<unknown> = Promise.resolve();
   private readonly editorHashes = new Map<string, string>();
   private readonly notices: string[] = [];
+  private readonly workspaceDirectory: string;
+  private readonly temporaryDirectory: string;
   private pending = 0;
   private used = false;
   private idle?: ReturnType<typeof setTimeout>;
@@ -297,9 +306,11 @@ export class LocalWorkspaceRuntime extends EventEmitter implements WorkspaceRunt
 
   constructor(readonly workspaceId: string, private readonly identity: Identity, private readonly options: RuntimeOptions = {}) {
     super();
-    if (!Number.isInteger(identity.uid) || identity.uid < MIN_UID || identity.gid !== identity.uid || !path.isAbsolute(identity.root)) {
+    if (!Number.isInteger(identity.uid) || identity.uid < MIN_UID || identity.uid >= MAX_UID || identity.gid !== identity.uid || !path.isAbsolute(identity.root)) {
       throw new Error('Invalid local workspace sandbox identity.');
     }
+    this.workspaceDirectory = path.posix.join(identity.root, 'workspace');
+    this.temporaryDirectory = path.posix.join(identity.root, 'tmp');
     this.monitor = setInterval(() => { void this.checkUsage().catch(() => {}); }, options.monitorMs ?? 5_000);
     this.monitor.unref();
     this.scheduleIdle();
@@ -308,7 +319,7 @@ export class LocalWorkspaceRuntime extends EventEmitter implements WorkspaceRunt
 
   private launcherArgs(command: string, args: string[]): string[] {
     if (!command.startsWith('/')) throw new Error('Sandbox commands must use absolute paths.');
-    return ['--root', this.identity.root, '--uid', String(this.identity.uid), '--gid', String(this.identity.gid), '--cwd', '/workspace', '--', command, ...args];
+    return ['--root', this.identity.root, '--uid', String(this.identity.uid), '--gid', String(this.identity.gid), '--cwd', this.workspaceDirectory, '--', command, ...args];
   }
   private launch(command: string, args: string[]): ChildProcessWithoutNullStreams {
     if (!this.alive) throw new Error('Workspace sandbox is closed.');
@@ -419,12 +430,12 @@ export class LocalWorkspaceRuntime extends EventEmitter implements WorkspaceRunt
       const changed = files.filter(file => file.type === 'FOLDER' || !sync || this.editorHashes.get(file.path) !== createHash('sha256').update(file.content || '').digest('hex'));
       if (!changed.length) return { count: 0 };
       const expected = Object.fromEntries(changed.filter(file => file.type === 'FILE').map(file => [file.path, this.editorHashes.get(file.path) ?? null]));
-      const output = await this.tool('/usr/bin/python3', ['-I', '-c', LOCAL_MIRROR_SCRIPT], JSON.stringify({ files: changed, expected }));
+      const output = await this.tool('/usr/bin/python3', ['-I', '-c', LOCAL_MIRROR_SCRIPT, this.workspaceDirectory], JSON.stringify({ files: changed, expected }));
       const reply = JSON.parse(output) as { ok?: boolean; backups?: unknown; backupCount?: number };
       if (!reply.ok) throw new Error('Workspace file synchronization failed.');
       for (const file of changed) if (file.type === 'FILE') this.editorHashes.set(file.path, createHash('sha256').update(file.content || '').digest('hex'));
       if (Array.isArray(reply.backups)) for (const backup of reply.backups) {
-        if (typeof backup === 'string' && this.notices.length < 40) this.notices.push(`\r\n[Preserved terminal changes at /workspace/${relativePath(backup, 2048)} before updating the editor file.]\r\n`);
+        if (typeof backup === 'string' && this.notices.length < 40) this.notices.push(`\r\n[Preserved terminal changes at ${this.workspaceDirectory}/${relativePath(backup, 2048)} before updating the editor file.]\r\n`);
       }
       if ((reply.backupCount || 0) > 40) this.notices.push(`\r\n[Preserved ${reply.backupCount} files. Recovery copies use the .syncscript-backup- suffix.]\r\n`);
       this.flushNotices();
@@ -438,7 +449,7 @@ export class LocalWorkspaceRuntime extends EventEmitter implements WorkspaceRunt
     if (!terminals.length) return;
     for (const data of this.notices.splice(0)) for (const terminal of terminals) this.emit('terminal-output', { terminalId: terminal.id, data });
   }
-  private writeFiles(raw: unknown, preserveExisting = false, root = '/workspace'): Promise<unknown> {
+  private writeFiles(raw: unknown, preserveExisting = false, root = this.workspaceDirectory): Promise<unknown> {
     const files = this.validateFiles(raw);
     const work = this.fileQueue.catch(() => {}).then(async () => {
       const result = await this.tool('/usr/bin/python3', ['-I', FILE_HELPER, root], JSON.stringify({ files, preserveExisting }));
@@ -501,7 +512,7 @@ export class LocalWorkspaceRuntime extends EventEmitter implements WorkspaceRunt
     if (!Object.hasOwn(extensions, language)) throw new Error('Unsupported execution language.');
     if (typeof payload.code !== 'string' || Buffer.byteLength(payload.code) > 256 * 1024) throw new Error('Source exceeds 256 KiB.');
     const temporaryName = `run-${randomUUID()}`;
-    const job: Job = { id, temporary: `/tmp/${temporaryName}`, closed: false, bytes: 0 };
+    const job: Job = { id, temporary: `${this.temporaryDirectory}/${temporaryName}`, closed: false, bytes: 0 };
     this.used = true;
     this.jobs.set(id, job);
     job.timer = setTimeout(() => this.finishJob(job, 124), this.options.executionMs ?? 20_000);
@@ -511,14 +522,14 @@ export class LocalWorkspaceRuntime extends EventEmitter implements WorkspaceRunt
       const sourceDirectory = directory === '.' ? '' : directory + '/';
       const snapshotName = `.syncscript-${randomUUID()}`;
       const snapshotPath = sourceDirectory + (language === 'java' ? `${snapshotName}/${path.posix.basename(requested)}` : `${snapshotName}.${extensions[language]}`);
-      job.snapshot = '/workspace/' + (language === 'java' ? sourceDirectory + snapshotName : snapshotPath);
-      await this.writeFiles([{ path: temporaryName, type: 'FOLDER' }], false, '/tmp');
+      job.snapshot = this.workspaceDirectory + '/' + (language === 'java' ? sourceDirectory + snapshotName : snapshotPath);
+      await this.writeFiles([{ path: temporaryName, type: 'FOLDER' }], false, this.temporaryDirectory);
       if (job.closed || !this.alive) throw new Error('Execution cancelled while preparing files.');
       // Execute the submitted editor snapshot beside its source so relative
       // imports/includes still work. Never overwrite terminal-only file edits.
       await this.writeFiles([{ path: snapshotPath, type: 'FILE', content: payload.code }]);
       if (job.closed || !this.alive) throw new Error('Execution cancelled while preparing files.');
-      const source = '/workspace/' + snapshotPath;
+      const source = this.workspaceDirectory + '/' + snapshotPath;
       const binary = `${job.temporary}/program`;
       const stages: Record<string, Stage[]> = {
         python: [['/usr/bin/python3', [source]]],
@@ -526,7 +537,7 @@ export class LocalWorkspaceRuntime extends EventEmitter implements WorkspaceRunt
         typescript: [['/usr/local/bin/tsx', [source]]],
         c: [['/usr/bin/gcc', [source, '-o', binary]], [binary, []]],
         cpp: [['/usr/bin/g++', [source, '-o', binary]], [binary, []]],
-        java: [['/usr/bin/javac', ['-J-Xmx256m', '-sourcepath', '/workspace/' + sourceDirectory, '-d', job.temporary, source]], ['/usr/bin/java', ['-Xmx256m', '-cp', job.temporary, path.posix.basename(source, '.java')]]],
+        java: [['/usr/bin/javac', ['-J-Xmx256m', `-J-Djava.io.tmpdir=${job.temporary}`, '-sourcepath', this.workspaceDirectory + '/' + sourceDirectory, '-d', job.temporary, source]], ['/usr/bin/java', ['-Xmx256m', `-Djava.io.tmpdir=${job.temporary}`, '-cp', job.temporary, path.posix.basename(source, '.java')]]],
       };
       await this.launchStage(job, stages[language], 0);
       return { executionId: id };
@@ -577,7 +588,7 @@ export class LocalWorkspaceRuntime extends EventEmitter implements WorkspaceRunt
     this.scheduleIdle();
   }
   private cleanupJobFiles(job: Job): void {
-    // Cleanup itself is unprivileged and chrooted; never fs.rm a user path
+    // Cleanup itself is unprivileged and Landlock-confined; never fs.rm a user path
     // from the root broker, even for a directory originally created by it.
     if (this.alive) {
       this.pending++;
@@ -601,8 +612,8 @@ export class LocalWorkspaceRuntime extends EventEmitter implements WorkspaceRunt
     // Files can disappear during normal editor saves and process cleanup.
     // Count through directory FDs without following symlinks; tolerate only
     // disappeared entries, while permission/accounting failures close the jail.
-    const script = 'import json,os\nseen=set(); total=0\ndef failure(error):\n if not isinstance(error,FileNotFoundError): raise error\ndef count(info):\n global total\n key=(info.st_dev,info.st_ino)\n if key not in seen: seen.add(key); total+=info.st_blocks*512\nfor root in ("/workspace","/tmp"):\n for current,dirs,files,fd in os.fwalk(root,onerror=failure,follow_symlinks=False):\n  count(os.fstat(fd))\n  for name in dirs+files:\n   try: count(os.stat(name,dir_fd=fd,follow_symlinks=False))\n   except FileNotFoundError: pass\nprint(json.dumps({"bytes":total}))';
-    const output = await this.tool('/usr/bin/python3', ['-I', '-c', script], '', 5000);
+    const script = 'import json,os,sys\nseen=set(); total=0\ndef failure(error):\n if not isinstance(error,FileNotFoundError): raise error\ndef count(info):\n global total\n key=(info.st_dev,info.st_ino)\n if key not in seen: seen.add(key); total+=info.st_blocks*512\nfor root in sys.argv[1:]:\n for current,dirs,files,fd in os.fwalk(root,onerror=failure,follow_symlinks=False):\n  count(os.fstat(fd))\n  for name in dirs+files:\n   try: count(os.stat(name,dir_fd=fd,follow_symlinks=False))\n   except FileNotFoundError: pass\nprint(json.dumps({"bytes":total}))';
+    const output = await this.tool('/usr/bin/python3', ['-I', '-c', script, this.workspaceDirectory, this.temporaryDirectory], '', 5000);
     const disk = (JSON.parse(output) as { bytes?: number }).bytes;
     if (typeof disk !== 'number' || !Number.isSafeInteger(disk) || disk < 0) throw new Error('Sandbox disk accounting failed.');
     return { rss, disk };

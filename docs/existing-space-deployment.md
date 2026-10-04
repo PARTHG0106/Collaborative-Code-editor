@@ -5,10 +5,15 @@ The Static SDK serves browser assets; it cannot host the Node API, Socket.IO,
 database connections, or terminal processes. Updating the existing Docker Space
 does not create a new Space or purchase a subscription.
 
-The image includes a separate filesystem for each workspace. A privileged
-launcher enters that filesystem, drops to a distinct workspace user, clears its
-environment and inherited descriptors, and installs a syscall filter before
-starting commands. There is no fallback to a shell with backend access.
+The image includes a shared, read-only language toolchain. Each workspace has
+its own source and temporary directories and a distinct operating-system user.
+Before starting commands, a privileged launcher clears inherited credentials
+and descriptors, drops privileges, and applies Landlock filesystem rules and a
+syscall filter. Commands can use the public toolchain and their own files, but
+cannot read backend files or list other workspace directories. Path metadata
+can remain visible; this boundary does not pretend to be a separate machine.
+Startup requires working Landlock enforcement; there is no unrestricted shell
+fallback.
 
 The terminal remains real Bash with Python, Node/TypeScript, C/C++, Java, and
 Git. On this host, terminal and CPU commands have **no network access**. Online
