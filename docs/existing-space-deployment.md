@@ -43,6 +43,7 @@ Add these as **variables**:
 | `CLOUDFLARE_ACCOUNT_ID` | `acb988175d69b272c1facb3c6f2f4c08` |
 | `CLOUDFLARE_D1_DATABASE_ID` | `2566c96b-196d-4049-ade8-a34709656263` |
 | `FILE_CONTENT_STORAGE` | `postgres` for the first rollout; then `d1` |
+| `D1_CHECK_ON_START` | Optional diagnostic; defaults to `false` |
 
 Add **secret** `CLOUDFLARE_D1_API_TOKEN` using the Cloudflare API token from
 `cloudflared1cred.txt`. Do not use the R2 access-key ID or secret-access key.
@@ -50,10 +51,14 @@ The ignored local `.env.d1-local` contains the verified values.
 
 First deploy the new code with `FILE_CONTENT_STORAGE=postgres` and no backfill,
 and verify the old API container has stopped. Older code cannot understand D1
-references and must not remain a writer during conversion. Then set
+references and must not remain a writer during conversion. Temporarily set
+`D1_CHECK_ON_START=true` for this deployment to check D1 from the actual Space
+network. This runs only `SELECT 1` and prints a sanitized result. In PostgreSQL
+mode with backfill disabled, failure still allows API startup. Review the logs
+and disable the diagnostic flag after confirming connectivity. Then set
 `FILE_CONTENT_STORAGE=d1` and `D1_BACKFILL_ON_START=true` and restart the existing
-Space. Startup uploads each blob before committing its reference, verifies all
-references, and stops if any step fails. After a successful migration, remove
+Space. Startup requires a successful D1 check, uploads each blob before committing
+its reference, verifies all references, and stops if any step fails. After a successful migration, remove
 the backfill variable or set it to `false`.
 Accounts, permissions, file metadata and other relational data stay in Supabase.
 Keep Supabase's `DATABASE_URL`.

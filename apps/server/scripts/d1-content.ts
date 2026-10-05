@@ -2,7 +2,6 @@ import dotenv from 'dotenv';
 import path from 'node:path';
 import { D1Client, D1ContentStore } from '../src/lib/d1ContentStore.js';
 import { migrateContentRow, type ContentMigrationRow } from '../src/lib/contentMigration.js';
-import { createContentMigrationClient } from '../src/lib/contentMigrationClient.js';
 
 // Injected environment takes precedence; the ignored D1-only file makes local
 // maintenance possible without changing the app's normal database settings.
@@ -13,15 +12,20 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const action = args[0];
   const apply = args.includes('--apply');
-  if (!['init', 'backfill', 'restore', 'verify'].includes(action) ||
+  if (!['check', 'init', 'backfill', 'restore', 'verify'].includes(action) ||
       args.slice(1).some(arg => arg !== '--apply')) {
-    console.info('Usage: npm run d1:content --workspace=apps/server -- <init|backfill|restore|verify> [--apply]');
-    console.info('init/backfill/restore are read-only plans unless --apply is supplied. verify is always read-only.');
+    console.info('Usage: npm run d1:content --workspace=apps/server -- <check|init|backfill|restore|verify> [--apply]');
+    console.info('init/backfill/restore are read-only plans unless --apply is supplied. check and verify are always read-only.');
     return;
   }
   const { CLOUDFLARE_ACCOUNT_ID: accountId, CLOUDFLARE_D1_DATABASE_ID: databaseId, CLOUDFLARE_D1_API_TOKEN: apiToken } = process.env;
   if (!accountId || !databaseId || !apiToken) throw new Error('Set the three server-side CLOUDFLARE D1 environment variables first.');
   const d1 = new D1Client({ accountId, databaseId, apiToken });
+  if (action === 'check') {
+    await d1.check();
+    console.info('D1 read-only connectivity check passed (SELECT 1; transport=node-http; family=4). No data was changed.');
+    return;
+  }
   if (action === 'init') {
     if (apply) await d1.initialize();
     console.info(apply ? 'D1 content tables are ready.' : 'Plan: create the two D1 content tables if absent. Add --apply to initialize.');
@@ -30,6 +34,8 @@ async function main(): Promise<void> {
 
   // Never import the app client: its development query/error logs can include
   // file contents, and maintenance does not need application JWT secrets.
+  // The connectivity check does not load Prisma or require a SQL connection.
+  const { createContentMigrationClient } = await import('../src/lib/contentMigrationClient.js');
   const db = createContentMigrationClient();
   const store = new D1ContentStore(d1);
   const counts = { scanned: 0, inline: 0, remote: 0, changed: 0, raced: 0, verified: 0 };

@@ -27,6 +27,11 @@ product; its S3 access keys cannot be used as a D1 API token.
   rather than silently replacing a file with an empty string. A small bounded
   process cache reduces reads; D1 availability is still required for cold reads
   and writes once enabled.
+- Server requests use the Node HTTP transport over IPv4 and honor the host's
+  standard proxy environment variables. TLS verification remains enabled,
+  redirects are rejected, and each request has a 15-second deadline. Network
+  failures report only a fixed error code and proxy-presence flags, never proxy
+  addresses, credentials, SQL values, or provider response bodies.
 - The Prisma extension resolves content for the existing editor, snapshot,
   terminal and execution paths. It supports direct model operations, including
   bulk operations, and relation reads. Nested file-content writes are rejected;
@@ -51,14 +56,20 @@ product; its S3 access keys cannot be used as a D1 API token.
    `FILE_CONTENT_STORAGE=postgres` until D1 is initialized and checked. All
    running API instances must use the new adapter before converting any rows;
    older releases interpret the SQL placeholder as an empty file.
-3. Run `npm run d1:content --workspace=apps/server -- init --apply`. This only
+3. Run `npm run d1:content --workspace=apps/server -- check` from the same
+   runtime/network environment as the deployed API. It executes only `SELECT 1`,
+   requires no PostgreSQL connection, and returns a nonzero exit code if D1
+   cannot be reached/authenticated. It does not initialize tables or inspect,
+   modify, or print file content. A successful local check does not establish
+   that the deployed server has working egress. Resolve failures before backfill.
+4. Run `npm run d1:content --workspace=apps/server -- init --apply`. This only
    creates missing D1 tables; it does not create a database or migrate files.
-4. Plan with `npm run d1:content --workspace=apps/server -- backfill`.
+5. Plan with `npm run d1:content --workspace=apps/server -- backfill`.
    Add `--apply` to copy existing file/snapshot text and replace matching SQL
    rows with references. The tool compares the original content/key/timestamp
    atomically, so concurrent edits are skipped instead of overwritten. It can
    be rerun; no inline copy is removed until its D1 upload succeeds.
-5. Run `npm run d1:content --workspace=apps/server -- verify` to read and validate
+6. Run `npm run d1:content --workspace=apps/server -- verify` to read and validate
    every referenced blob. Test create/edit/reconnect/snapshot/restore in an
    isolated workspace, then set `FILE_CONTENT_STORAGE=d1` on the API server.
    New saves now use D1. Rerun backfill/verify for any concurrent inline writes.
@@ -70,8 +81,22 @@ Maintenance uses `DIRECT_URL` when supplied, otherwise `DATABASE_URL`, and does
 not require application JWT secrets. Its isolated database client disables
 Prisma query and error logging so source text cannot appear in command output.
 Backfill/restore/initialization are read-only plans
-unless `--apply` is passed; verify always reads without writing. Command output
+unless `--apply` is passed; check and verify always read without writing. Command output
 contains counts, never source text or credentials. Keep both SQL and D1 backups.
+
+On hosts without a trusted administrative shell, temporarily set
+`D1_CHECK_ON_START=true` for the next deployment. It defaults to `false` and
+runs the same read-only connectivity check after the normal SQL migration
+preflight. With `FILE_CONTENT_STORAGE=postgres` and backfill disabled, a failed
+check logs a sanitized diagnostic and the API still starts. The check itself
+only executes `SELECT 1`; it does not initialize D1 tables or migrate content.
+Review the deployment logs and remove the flag or set it to `false` afterward.
+If D1 storage is enabled, a requested check failure stops startup.
+
+`D1_BACKFILL_ON_START=true` always requires a successful connectivity check
+before backfill, even when `D1_CHECK_ON_START` is unset. A failed check stops
+startup before any content conversion. Successful backfill is followed by
+verification; remove the backfill flag after migration.
 
 ## Roll back
 

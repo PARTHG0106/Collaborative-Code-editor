@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { Agent as HttpsAgent } from 'node:https';
+import axios from 'axios';
 
 export interface ContentStore {
   put(content: string): Promise<string>;
@@ -27,6 +29,53 @@ export const D1_SCHEMA = [
 export const CHUNK_BYTES = 192 * 1024;
 const MAX_CONTENT_BYTES = 100 * 1024 * 1024;
 const KEY_PATTERN = /^[a-f0-9]{64}$/;
+const REQUEST_TIMEOUT_MS = 15_000;
+// The agent options also reach the proxy's CONNECT socket; setting family only
+// on the HTTP request would leave the proxy hostname free to resolve to IPv6.
+const TLS_AGENT = new HttpsAgent({ keepAlive: true, rejectUnauthorized: true, family: 4 });
+type D1Transport = (url: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'status' | 'json'>>;
+
+// Node 20 fetch does not honor the platform's HTTP(S)_PROXY settings. The
+// Node HTTP adapter does, and IPv4 avoids an unusable IPv6 egress route.
+const nodeHttpTransport: D1Transport = async (url, init) => {
+  const response = await axios.request<string>({
+    adapter: 'http', url, method: 'POST', data: init.body,
+    headers: init.headers as Record<string, string>, signal: init.signal ?? undefined,
+    family: 4, timeout: REQUEST_TIMEOUT_MS, maxRedirects: 0,
+    httpsAgent: TLS_AGENT,
+    // read() pages four chunks (1 MiB base64 plus JSON) per response, even for
+    // a 100 MiB file. This cap applies to a page, not the whole stored file.
+    maxBodyLength: 2 * 1024 * 1024, maxContentLength: 8 * 1024 * 1024,
+    responseType: 'text', transformResponse: [data => data], validateStatus: () => true,
+    // Deliberately leave proxy unset so Axios honors HTTPS_PROXY/ALL_PROXY and
+    // NO_PROXY. Never log its resolved proxy URL or authentication details.
+  });
+  return { ok: response.status >= 200 && response.status < 300, status: response.status,
+    json: async () => JSON.parse(response.data) as unknown };
+};
+
+const NETWORK_CODES = new Set([
+  'ENOTFOUND', 'EAI_AGAIN', 'ETIMEDOUT', 'ECONNABORTED', 'ERR_CANCELED',
+  'ENETUNREACH', 'EHOSTUNREACH', 'ECONNREFUSED', 'ECONNRESET', 'EPIPE',
+  'ERR_NETWORK', 'ERR_INVALID_URL', 'ERR_BAD_REQUEST', 'ERR_BAD_RESPONSE',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT', 'UND_ERR_SOCKET',
+  'CERT_HAS_EXPIRED', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'SELF_SIGNED_CERT_IN_CHAIN',
+  'DEPTH_ZERO_SELF_SIGNED_CERT', 'ERR_TLS_CERT_ALTNAME_INVALID', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+]);
+
+/** A fixed allowlist prevents provider errors or proxy credentials reaching logs. */
+export function d1NetworkDiagnostic(error: unknown, env: NodeJS.ProcessEnv = process.env): string {
+  let code = 'UNKNOWN';
+  let cause = error;
+  for (let depth = 0; depth < 3 && cause && typeof cause === 'object'; depth++) {
+    const item = cause as { code?: unknown; name?: unknown; cause?: unknown };
+    if (typeof item.code === 'string' && NETWORK_CODES.has(item.code)) code = item.code;
+    else if (item.name === 'TimeoutError' || item.name === 'AbortError') code = 'TIMEOUT';
+    cause = item.cause;
+  }
+  const configured = (name: string) => Boolean(env[name.toLowerCase()]?.trim() || env[name]?.trim());
+  return `transport=node-http; family=4; code=${code}; httpsProxy=${configured('HTTPS_PROXY')}; httpProxy=${configured('HTTP_PROXY')}; allProxy=${configured('ALL_PROXY')}; noProxy=${configured('NO_PROXY')}`;
+}
 
 export function contentKey(content: string): string {
   return createHash('sha256').update(Buffer.from(content, 'utf16le')).digest('hex');
@@ -35,7 +84,7 @@ export function contentKey(content: string): string {
 export class D1Client {
   private readonly endpoint: string;
 
-  constructor(private readonly options: D1Options, private readonly fetcher: typeof fetch = fetch) {
+  constructor(private readonly options: D1Options, private readonly fetcher: D1Transport = nodeHttpTransport) {
     if (!/^[a-f0-9]{32}$/i.test(options.accountId) ||
         !/^[a-f0-9-]{36}$/i.test(options.databaseId) || !options.apiToken.trim()) {
       throw new Error('Invalid D1 configuration: set account ID, database ID, and API token.');
@@ -44,17 +93,17 @@ export class D1Client {
   }
 
   async query<T>(sql: string, params: (string | number | null)[] = []): Promise<T[]> {
-    let response: Response;
+    let response: Pick<Response, 'ok' | 'status' | 'json'>;
     try {
       response = await this.fetcher(this.endpoint, {
         method: 'POST',
         headers: { Authorization: `Bearer ${this.options.apiToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ sql, params }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
-    } catch {
+    } catch (error) {
       // Never include request headers, SQL values, or provider bodies in logs.
-      throw new Error('D1 request failed or timed out.');
+      throw new Error(`D1 request failed (${d1NetworkDiagnostic(error)}).`);
     }
     if (!response.ok) throw new Error(`D1 request failed (HTTP ${response.status}).`);
     let body: { success?: boolean; result?: { success?: boolean; results?: T[] }[] };
@@ -69,6 +118,13 @@ export class D1Client {
 
   async initialize(): Promise<void> {
     for (const sql of D1_SCHEMA) await this.query(sql);
+  }
+
+  async check(): Promise<void> {
+    const rows = await this.query<{ ok: number }>('SELECT 1 AS ok');
+    if (rows.length !== 1 || rows[0].ok !== 1) {
+      throw new Error('D1 connectivity check returned an unexpected result.');
+    }
   }
 }
 
