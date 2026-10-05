@@ -16,12 +16,14 @@ interface RightPanelProps {
   onChatInputChange: (val: string) => void;
   onSendMessage: (msg: string) => void;
   activeCollaborators: { id: string; name: string; email: string }[];
+  isConnected: boolean;
+  presenceReady: boolean;
   currentUserId: string;
 }
 
 export const RightPanel: React.FC<RightPanelProps> = ({
   collapsed, chatMessages, typingUsers, chatInput,
-  onChatInputChange, onSendMessage, activeCollaborators, currentUserId
+  onChatInputChange, onSendMessage, activeCollaborators, isConnected, presenceReady, currentUserId
 }) => {
   const [activeTab, setActiveTab] = React.useState<'chat' | 'users'>('chat');
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -39,7 +41,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           <MessageSquare size={12} /> Chat
         </button>
         <button className={`ide-right-tab ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>
-          <Users size={12} /> Online ({activeCollaborators.length})
+          <Users size={12} /> Online ({presenceReady ? activeCollaborators.length : '—'})
         </button>
       </div>
 
@@ -79,7 +81,10 @@ export const RightPanel: React.FC<RightPanelProps> = ({
           </div>
         ) : (
           <div>
-            {activeCollaborators.map(c => (
+            {!presenceReady && <p className="ide-online-status" role="status" style={{ padding: '12px 16px' }}>
+              {isConnected ? 'Loading online users...' : 'Reconnecting. Online users are temporarily unavailable.'}
+            </p>}
+            {presenceReady && activeCollaborators.map(c => (
               <div key={c.id} className="ide-online-user">
                 <div className="ide-online-avatar" style={{ background: getColor(c.id) }}>
                   {c.name.charAt(0).toUpperCase()}

@@ -599,12 +599,13 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
         workspaceName={workspace.name}
         collaboratorCount={ws.activeCollaborators.length}
         isConnected={ws.isConnected}
+        presenceReady={ws.presenceReady}
         userName={user?.name || ''}
         onBack={() => { if (!collaboration.hasPendingChanges || window.confirm('Changes or recovered copies are still unsaved. Leave this workspace?')) onBack(); }}
         rightPanelOpen={rightPanelOpen}
         onToggleRightPanel={() => setRightPanelOpen(p => !p)}
       />
-      {(error || collaboration.error) && <div role="alert" style={{ padding: 8, color: 'var(--ide-danger)' }}>{error || collaboration.error}</div>}
+      {(error || collaboration.error || ws.permissionError) && <div role="alert" style={{ padding: 8, color: 'var(--ide-danger)' }}>{error || collaboration.error || ws.permissionError}</div>}
       {collaboration.recoveries.map(draft => <div role="alert" key={`${draft.fileId}-${draft.id}`} style={{ padding: 8 }}>
         An unsynced copy was preserved. Download it to keep your changes.
         <button className="ide-btn" onClick={() => {
@@ -635,7 +636,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           {activity === 'collaborators' && (
             <CollaboratorsPanel
               members={workspace.members} currentUserId={user?.id || ''} currentUserRole={workspace.currentUserRole}
-              activeCollaborators={ws.activeCollaborators} canModify={canModify}
+              activeCollaborators={ws.activeCollaborators} presenceReady={ws.presenceReady} canModify={canModify}
               onInvite={handleInvite} onChangeRole={handleRoleChange} onRemoveMember={handleRemoveMember}
             />
           )}
@@ -817,6 +818,8 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           onChatInputChange={ws.handleChatInputChange}
           onSendMessage={ws.sendChatMessage}
           activeCollaborators={ws.activeCollaborators}
+          isConnected={ws.isConnected}
+          presenceReady={ws.presenceReady}
           currentUserId={user?.id || ''}
         />
       </div>

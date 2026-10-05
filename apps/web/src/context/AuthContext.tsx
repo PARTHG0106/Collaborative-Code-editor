@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import axios, { AxiosInstance } from 'axios';
 
 export interface User {
@@ -24,6 +24,7 @@ interface AuthContextType {
   resendVerification: (email: string) => Promise<void>;
   logout: () => Promise<void>;
   clearError: () => void;
+  refreshAccessToken: () => Promise<string>;
   apiClient: AxiosInstance;
 }
 
@@ -125,7 +126,18 @@ async function performRefresh(): Promise<string> {
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [accessToken, updateAccessToken] = useState<string | null>(null);
+  const accessTokenRef = useRef<string | null>(null);
+  const sessionVersionRef = useRef(0);
+  const invalidatePendingRefresh = useCallback(() => {
+    sessionVersionRef.current += 1;
+    refreshInFlight = null;
+  }, []);
+  const setAccessToken = useCallback((token: string | null) => {
+    // HTTP retries and socket handshakes may run before React commits effects.
+    accessTokenRef.current = token;
+    updateAccessToken(token);
+  }, []);
   const [loading, setLoading] = useState<boolean>(true);
   const [serverWaking, setServerWaking] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,25 +150,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
    * axios interceptor can retry the original request.
    */
   const refreshAccessToken = useCallback(async (): Promise<string> => {
+    const sessionVersion = sessionVersionRef.current;
     if (!refreshInFlight) {
-      refreshInFlight = performRefresh()
-        .then((token) => {
-          setAccessToken(token);
-          return token;
-        })
-        .finally(() => {
-          refreshInFlight = null;
-        });
+      const pending = performRefresh().finally(() => {
+        if (refreshInFlight === pending) refreshInFlight = null;
+      });
+      refreshInFlight = pending;
     }
-    return refreshInFlight;
+    const token = await refreshInFlight;
+    if (sessionVersion !== sessionVersionRef.current) {
+      throw new Error('The signed-in session changed while renewing its token');
+    }
+    setAccessToken(token);
+    return token;
   }, []);
 
   // Sync token to Axios headers
   useEffect(() => {
     const requestInterceptor = apiClient.interceptors.request.use(
       (config) => {
-        if (accessToken) {
-          config.headers.Authorization = `Bearer ${accessToken}`;
+        const sessionRequest = config as typeof config & { _authSessionVersion?: number };
+        // A delayed retry must never send one account's action as another.
+        if (sessionRequest._authSessionVersion !== undefined && sessionRequest._authSessionVersion !== sessionVersionRef.current) {
+          throw new Error('The signed-in session changed before this request could be sent');
+        }
+        sessionRequest._authSessionVersion = sessionVersionRef.current;
+        if (accessTokenRef.current) {
+          config.headers.Authorization = `Bearer ${accessTokenRef.current}`;
         }
         return config;
       },
@@ -166,7 +186,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => {
       apiClient.interceptors.request.eject(requestInterceptor);
     };
-  }, [accessToken]);
+  }, []);
 
   // Handle transparent token refreshing on 401 expiry
   useEffect(() => {
@@ -184,7 +204,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         // If error is 401 (Unauthorized), not already retried, and NOT a public auth endpoint
         if (err.response?.status === 401 && originalRequest && !originalRequest._retry && !isPublicAuthEndpoint) {
+          if (originalRequest._authSessionVersion !== sessionVersionRef.current) return Promise.reject(err);
           originalRequest._retry = true;
+          const sessionVersion = originalRequest._authSessionVersion;
 
           try {
             // Single-flight: the IDE fires several requests at once (workspace,
@@ -201,8 +223,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return apiClient(originalRequest);
           } catch (refreshErr) {
             // Refresh token is expired or invalid -> log out
-            setUser(null);
-            setAccessToken(null);
+            if (sessionVersion === sessionVersionRef.current) {
+              invalidatePendingRefresh();
+              setUser(null);
+              setAccessToken(null);
+            }
             return Promise.reject(refreshErr);
           }
         }
@@ -259,6 +284,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response = await apiClient.post('/auth/login', { email, password });
       if (response.data && response.data.success) {
         const { accessToken: token, user: userData } = response.data.data;
+        invalidatePendingRefresh();
         setAccessToken(token);
         setUser(userData);
       }
@@ -302,6 +328,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const response = await apiClient.post('/auth/verify', { email, code });
       if (response.data && response.data.success) {
         const { accessToken: token, user: userData } = response.data.data;
+        invalidatePendingRefresh();
         setAccessToken(token);
         setUser(userData);
       }
@@ -336,6 +363,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {
       // Suppress backend logout errors
     } finally {
+      invalidatePendingRefresh();
       setAccessToken(null);
       setUser(null);
       setLoading(false);
@@ -356,6 +384,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resendVerification,
         logout,
         clearError,
+        refreshAccessToken,
         apiClient,
       }}
     >

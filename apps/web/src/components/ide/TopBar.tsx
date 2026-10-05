@@ -6,6 +6,7 @@ interface TopBarProps {
   workspaceName: string;
   collaboratorCount: number;
   isConnected: boolean;
+  presenceReady: boolean;
   userName: string;
   onBack: () => void;
   rightPanelOpen: boolean;
@@ -13,7 +14,7 @@ interface TopBarProps {
 }
 
 export const TopBar: React.FC<TopBarProps> = ({
-  workspaceName, collaboratorCount, isConnected,
+  workspaceName, collaboratorCount, isConnected, presenceReady,
   userName, onBack, rightPanelOpen, onToggleRightPanel
 }) => {
   return (
@@ -28,10 +29,10 @@ export const TopBar: React.FC<TopBarProps> = ({
       <div className="ide-topbar-center" />
 
       <div className="ide-topbar-right">
-        <span className={`ide-connection-dot ${isConnected ? '' : 'offline'}`} />
-        <span className="ide-collab-count">
+        <span className={`ide-connection-dot ${isConnected ? '' : 'offline'}`} title={isConnected ? 'Connected' : 'Reconnecting'} />
+        <span className="ide-collab-count" aria-label={presenceReady ? `${collaboratorCount} online` : 'Online count unavailable'} title={presenceReady ? 'People online' : isConnected ? 'Loading online users' : 'Reconnecting'}>
           <Users size={12} />
-          {collaboratorCount}
+          {presenceReady ? collaboratorCount : '—'}
         </span>
         <button className="ide-topbar-btn" onClick={onToggleRightPanel} title="Toggle collaboration panel">
           {rightPanelOpen ? 'Hide Panel' : 'Show Panel'}

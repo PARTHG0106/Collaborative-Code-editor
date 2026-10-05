@@ -14,6 +14,7 @@ interface CollaboratorsPanelProps {
   currentUserId: string;
   currentUserRole: string;
   activeCollaborators: { id: string; name: string; email: string }[];
+  presenceReady: boolean;
   canModify: boolean;
   onInvite: (email: string, role: 'EDITOR' | 'VIEWER') => void;
   onChangeRole: (userId: string, role: 'EDITOR' | 'VIEWER') => void;
@@ -28,13 +29,13 @@ const getColor = (id: string) => {
 };
 
 export const CollaboratorsPanel: React.FC<CollaboratorsPanelProps> = ({
-  members, currentUserId, currentUserRole, activeCollaborators, canModify,
+  members, currentUserId, currentUserRole, activeCollaborators, presenceReady, canModify,
   onInvite, onChangeRole, onRemoveMember
 }) => {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<'EDITOR' | 'VIEWER'>('EDITOR');
   const isOwner = currentUserRole === 'OWNER';
-  const onlineIds = new Set(activeCollaborators.map(c => c.id));
+  const onlineIds = new Set(presenceReady ? activeCollaborators.map(c => c.id) : []);
 
   return (
     <>
@@ -56,6 +57,7 @@ export const CollaboratorsPanel: React.FC<CollaboratorsPanelProps> = ({
         </form>
       )}
       <div className="ide-sidebar-body">
+        {!presenceReady && <p className="ide-online-status" role="status" style={{ padding: '8px 12px' }}>Online status is temporarily unavailable.</p>}
         {members.map(m => (
           <div key={m.userId} className="ide-member-row">
             <div className="ide-online-avatar" style={{ background: getColor(m.userId) }}>

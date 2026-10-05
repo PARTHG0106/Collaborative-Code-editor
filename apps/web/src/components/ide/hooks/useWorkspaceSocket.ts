@@ -25,6 +25,8 @@ interface TypingUser {
 interface UseWorkspaceSocketReturn {
   socket: Socket | null;
   isConnected: boolean;
+  /** True only after this connection has received the workspace presence list. */
+  presenceReady: boolean;
   activeCollaborators: UserPayload[];
   chatMessages: ChatMessage[];
   typingUsers: TypingUser[];
@@ -49,9 +51,10 @@ function mergeMessages(history: ChatMessage[], live: ChatMessage[]): ChatMessage
 }
 
 export function useWorkspaceSocket(workspaceId: string, chatVisible = false): UseWorkspaceSocketReturn {
-  const { apiClient, user, accessToken } = useAuth();
+  const { apiClient, user, accessToken, refreshAccessToken } = useAuth();
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [presenceReady, setPresenceReady] = useState(false);
   const [activeCollaborators, setActiveCollaborators] = useState<UserPayload[]>([]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
@@ -62,6 +65,9 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rightPanelOpenRef = useRef(chatVisible);
   rightPanelOpenRef.current = chatVisible;
+  const accessTokenRef = useRef(accessToken);
+  accessTokenRef.current = accessToken;
+  const hasAccessToken = Boolean(accessToken);
 
   const clearPermissionError = useCallback(() => setPermissionError(null), []);
 
@@ -78,17 +84,27 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
 
   // Connect socket
   useEffect(() => {
-    const token = accessToken;
     setIsConnected(false);
+    setPresenceReady(false);
     setActiveCollaborators([]);
     setTypingUsers([]);
     setSocket(null);
-    if (!token) return;
+    if (!hasAccessToken) return;
 
     const wsUrl = (import.meta as any).env?.VITE_WS_URL || 'http://localhost:3000';
-    const newSocket = io(wsUrl, { auth: { token }, forceNew: true });
+    let handshakeToken = accessTokenRef.current;
+    // Token refresh must not tear down a healthy editing connection. Socket.IO
+    // invokes this callback for each handshake, including reconnects.
+    const newSocket = io(wsUrl, {
+      auth: (sendAuth) => {
+        handshakeToken = accessTokenRef.current;
+        sendAuth({ token: handshakeToken });
+      },
+      forceNew: true,
+    });
     let active = true;
     let historyRequest = 0;
+    let retriedAuthentication = false;
     setSocket(newSocket);
 
     const fetchChatHistory = async () => {
@@ -107,7 +123,10 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
 
     const onConnect = () => {
       if (!active) return;
+      retriedAuthentication = false;
       setIsConnected(true);
+      setPresenceReady(false);
+      setPermissionError(null);
       console.info('\ud83d\udd0c Connected to Socket.IO Server');
       newSocket.emit('join_workspace', { workspaceId });
       // Also fills any chat gap after a reconnect.
@@ -116,15 +135,38 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
 
     newSocket.on('connect', onConnect);
 
-    newSocket.on('connect_error', (err) => {
+    newSocket.on('connect_error', async (err) => {
       if (!active) return;
       setIsConnected(false);
+      setPresenceReady(false);
+      setActiveCollaborators([]);
+      setTypingUsers([]);
       console.error('Socket connection error:', err.message);
+      // Middleware denials stop Socket.IO's automatic reconnects. An idle
+      // session can therefore get stuck after its access token expires unless
+      // we renew it explicitly. Network failures keep the normal backoff.
+      if (!err.message.startsWith('Authentication error:')) return;
+      if (retriedAuthentication) {
+        setPermissionError('Your session could not be renewed. Sign in again to reconnect.');
+        return;
+      }
+      retriedAuthentication = true;
+      try {
+        const token = accessTokenRef.current !== handshakeToken
+          ? accessTokenRef.current
+          : await refreshAccessToken();
+        if (!active || !token || !accessTokenRef.current) return;
+        accessTokenRef.current = token;
+        newSocket.connect();
+      } catch {
+        if (active) setPermissionError('Your session could not be renewed. Sign in again to reconnect.');
+      }
     });
 
     newSocket.on('disconnect', (reason) => {
       if (!active) return;
       setIsConnected(false);
+      setPresenceReady(false);
       setActiveCollaborators([]);
       setTypingUsers([]);
       isTypingRef.current = false;
@@ -134,9 +176,10 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
     });
 
     newSocket.on('workspace_users', (users: UserPayload[]) => {
-      if (!active) return;
+      if (!active || !newSocket.connected) return;
       // Presence is per socket on the server, but the list represents people.
       setActiveCollaborators([...new Map(users.map(person => [person.id, person])).values()]);
+      setPresenceReady(true);
     });
 
     newSocket.on('chat_message', (msg: ChatMessage) => {
@@ -165,6 +208,10 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
       if (!active) return;
       console.warn(`Socket event ${event} was denied: ${message}`);
       setPermissionError(message || 'You do not have permission to do that.');
+      if (event === 'join_workspace') {
+        setPresenceReady(false);
+        setActiveCollaborators([]);
+      }
     });
 
     newSocket.on('error', (errMsg: string) => {
@@ -182,7 +229,7 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
       if (newSocket.connected) newSocket.emit('leave_workspace', { workspaceId });
       newSocket.disconnect();
     };
-  }, [workspaceId, accessToken, apiClient, user?.id]);
+  }, [workspaceId, hasAccessToken, apiClient, user?.id, refreshAccessToken]);
 
   const sendChatMessage = useCallback((message: string) => {
     if (!message.trim() || !socket?.connected) return;
@@ -218,6 +265,7 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
   return {
     socket,
     isConnected,
+    presenceReady,
     activeCollaborators,
     chatMessages,
     typingUsers,
