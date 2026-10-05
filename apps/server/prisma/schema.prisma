@@ -23,7 +23,8 @@ model HealthCheck {
 model User {
   id            String            @id @default(cuid())
   email         String            @unique
-  passwordHash  String            @map("password_hash")
+  passwordHash  String?           @map("password_hash")
+  googleSubject String?           @unique @map("google_subject")
   name          String
   createdAt           DateTime          @default(now()) @map("created_at")
   updatedAt           DateTime          @updatedAt @map("updated_at")
@@ -51,6 +52,16 @@ model RefreshToken {
   @@index([expiresAt])
   @@index([tokenHash])
   @@map("refresh_tokens")
+}
+
+/// A browser-bound, one-use nonce for Google sign-in (only hashes are stored).
+model GoogleAuthChallenge {
+  tokenHash String   @id @map("token_hash")
+  nonceHash String   @map("nonce_hash")
+  expiresAt DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("google_auth_challenges")
 }
 
 enum WorkspaceRole {

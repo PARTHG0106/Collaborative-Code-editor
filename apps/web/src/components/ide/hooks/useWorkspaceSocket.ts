@@ -39,6 +39,11 @@ interface UseWorkspaceSocketReturn {
   /** Most recent authorization denial from the server, if any. */
   permissionError: string | null;
   clearPermissionError: () => void;
+  chatHistoryLoading: boolean;
+  chatHistoryError: string | null;
+  retryChatHistory: () => void;
+  isSendingChat: boolean;
+  chatSendError: string | null;
 }
 
 function mergeMessages(history: ChatMessage[], live: ChatMessage[]): ChatMessage[] {
@@ -61,6 +66,12 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
   const [unreadMessages, setUnreadMessages] = useState(0);
   const [chatInput, setChatInput] = useState('');
   const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [chatHistoryLoading, setChatHistoryLoading] = useState(true);
+  const [chatHistoryError, setChatHistoryError] = useState<string | null>(null);
+  const [isSendingChat, setIsSendingChat] = useState(false);
+  const [chatSendError, setChatSendError] = useState<string | null>(null);
+  const retryHistoryRef = useRef<(() => void) | null>(null);
+  const pendingChatRef = useRef<{ timer: ReturnType<typeof setTimeout>; cancel: () => void } | null>(null);
   const isTypingRef = useRef(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rightPanelOpenRef = useRef(chatVisible);
@@ -70,12 +81,16 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
   const hasAccessToken = Boolean(accessToken);
 
   const clearPermissionError = useCallback(() => setPermissionError(null), []);
+  const retryChatHistory = useCallback(() => retryHistoryRef.current?.(), []);
 
   useEffect(() => {
     setChatMessages([]);
     setChatInput('');
     setUnreadMessages(0);
     setPermissionError(null);
+    setChatHistoryError(null);
+    setChatSendError(null);
+    setIsSendingChat(false);
   }, [workspaceId, user?.id]);
 
   useEffect(() => {
@@ -85,11 +100,12 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
   // Connect socket
   useEffect(() => {
     setIsConnected(false);
+    setIsSendingChat(false);
     setPresenceReady(false);
     setActiveCollaborators([]);
     setTypingUsers([]);
     setSocket(null);
-    if (!hasAccessToken) return;
+    if (!hasAccessToken) { setChatHistoryLoading(false); return; }
 
     const wsUrl = (import.meta as any).env?.VITE_WS_URL || 'http://localhost:3000';
     let handshakeToken = accessTokenRef.current;
@@ -109,17 +125,23 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
 
     const fetchChatHistory = async () => {
       const request = ++historyRequest;
+      setChatHistoryLoading(true);
+      setChatHistoryError(null);
       try {
         const res = await apiClient.get(`/workspaces/${workspaceId}/chat`);
+        if (!res.data?.success) throw new Error('Chat history unavailable');
         if (active && request === historyRequest && res.data?.success) {
           // Live messages can arrive before this request finishes. Merging
           // keeps them visible and avoids duplicates also present in history.
           setChatMessages(prev => mergeMessages(res.data.data.messages, prev));
         }
       } catch (err) {
-        if (active) console.error('Failed to load chat history:', err);
+        if (active && request === historyRequest) setChatHistoryError('Chat history could not load. Your messages are still saved; try again.');
+      } finally {
+        if (active && request === historyRequest) setChatHistoryLoading(false);
       }
     };
+    retryHistoryRef.current = () => { void fetchChatHistory(); };
 
     const onConnect = () => {
       if (!active) return;
@@ -170,6 +192,7 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
       setActiveCollaborators([]);
       setTypingUsers([]);
       isTypingRef.current = false;
+      pendingChatRef.current?.cancel();
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
       console.info('\ud83d\udd0c Disconnected from Socket.IO Server:', reason);
@@ -207,6 +230,7 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
     newSocket.on('authz_error', ({ event, message }: { event: string; message: string }) => {
       if (!active) return;
       console.warn(`Socket event ${event} was denied: ${message}`);
+      if (event === 'chat_message') return; // Delivery acknowledgement keeps this error beside the preserved draft.
       setPermissionError(message || 'You do not have permission to do that.');
       if (event === 'join_workspace') {
         setPresenceReady(false);
@@ -223,6 +247,9 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
 
     return () => {
       active = false;
+      retryHistoryRef.current = null;
+      if (pendingChatRef.current) clearTimeout(pendingChatRef.current.timer);
+      pendingChatRef.current = null;
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       typingTimeoutRef.current = null;
       isTypingRef.current = false;
@@ -232,10 +259,26 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
   }, [workspaceId, hasAccessToken, apiClient, user?.id, refreshAccessToken]);
 
   const sendChatMessage = useCallback((message: string) => {
-    if (!message.trim() || !socket?.connected) return;
-
-    socket.emit('chat_message', { workspaceId, message: message.trim() });
-    setChatInput('');
+    const text = message.trim();
+    if (!text || !socket?.connected || pendingChatRef.current) return;
+    if (text.length > 4000) { setChatSendError('Messages can contain up to 4,000 characters.'); return; }
+    setIsSendingChat(true);
+    setChatSendError(null);
+    const pending = {
+      timer: undefined as unknown as ReturnType<typeof setTimeout>,
+      cancel: () => finish({ success: false, error: 'Delivery was not confirmed. Check the chat before sending again. Your draft is preserved.' }),
+    };
+    const finish = (result?: { success?: boolean; error?: string }) => {
+      if (pendingChatRef.current !== pending) return;
+      clearTimeout(pending.timer);
+      pendingChatRef.current = null;
+      setIsSendingChat(false);
+      if (result?.success) setChatInput(current => current.trim() === text ? '' : current);
+      else setChatSendError(result?.error || 'Message could not be sent. Your draft is preserved; try again.');
+    };
+    pending.timer = setTimeout(pending.cancel, 10000);
+    pendingChatRef.current = pending;
+    socket.emit('chat_message', { workspaceId, message: text }, finish);
     if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
     typingTimeoutRef.current = null;
 
@@ -277,6 +320,11 @@ export function useWorkspaceSocket(workspaceId: string, chatVisible = false): Us
     setChatInput,
     permissionError,
     clearPermissionError,
+    chatHistoryLoading,
+    chatHistoryError,
+    retryChatHistory,
+    isSendingChat,
+    chatSendError,
   };
 }
 

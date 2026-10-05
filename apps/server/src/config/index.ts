@@ -90,6 +90,9 @@ export const config = {
   /** Administrative switch for the isolated workspace terminal. */
   enableTerminal: process.env.ENABLE_TERMINAL === 'true',
 
+  /** Public OAuth web client ID. An empty value leaves Google sign-in disabled. */
+  googleClientId: process.env.GOOGLE_CLIENT_ID?.trim() || null,
+
   /** JWT configuration settings */
   jwt: {
     accessSecret: requireSecret('JWT_ACCESS_SECRET'),

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { VerifyEmail } from './VerifyEmail';
@@ -84,5 +84,30 @@ describe('VerifyEmail Component', () => {
 
     // Check that cooldown timer text is displayed
     expect(screen.getByText(/Resend Code in 30s/i)).toBeInTheDocument();
+  });
+
+  it('distinguishes sending a new code from verifying and prevents concurrent requests', async () => {
+    const { resendVerification, verifyEmail } = useAuth();
+    let finish!: () => void;
+    vi.mocked(resendVerification).mockReturnValueOnce(new Promise<void>((resolve) => { finish = resolve; }));
+    const { container } = renderWithRouter();
+    fireEvent.change(screen.getByLabelText('Verification Code'), { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Resend Verification Code' }));
+    expect(screen.getByRole('button', { name: 'Sending Code...' })).toBeDisabled();
+    expect(screen.queryByText('Verifying...')).not.toBeInTheDocument();
+    fireEvent.submit(container.querySelector('form')!);
+    expect(verifyEmail).not.toHaveBeenCalled();
+    await act(async () => finish());
+    expect(screen.getByRole('status')).toHaveTextContent('A fresh 6-digit code has been sent');
+    expect(screen.getByRole('button', { name: 'Resend Code in 30s' })).toBeDisabled();
+    expect(screen.getByLabelText('Verification Code')).toBeEnabled();
+  });
+
+  it('explains how to recover when the verification link is missing an email', () => {
+    window.history.pushState({}, '', '/verify-email');
+    renderWithRouter();
+    expect(screen.getByRole('alert')).toHaveTextContent('No email address provided');
+    expect(screen.getByLabelText('Verification Code')).toBeDisabled();
+    expect(screen.getByRole('link', { name: 'Sign In' })).toHaveAttribute('href', '/login');
   });
 });

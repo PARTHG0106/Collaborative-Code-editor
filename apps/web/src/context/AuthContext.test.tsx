@@ -42,6 +42,23 @@ async function restoreSession() {
 }
 
 describe('AuthContext refresh', () => {
+  it('shares the initial cookie restoration across Strict Mode effect replays', async () => {
+    const pendingRefresh = deferred();
+    adapter.mockImplementation(async config => config.url === '/auth/refresh'
+      ? pendingRefresh.promise
+      : response(config, { success: true, data: { user } }));
+    render(<React.StrictMode><AuthProvider><Probe /></AuthProvider></React.StrictMode>);
+    await waitFor(() => expect(adapter.mock.calls.filter(([config]) => config.url === '/auth/refresh')).toHaveLength(1));
+    expect(auth.loading).toBe(true);
+    await act(async () => {
+      pendingRefresh.resolve(response({}, { success: true, data: { accessToken: 'restored-token' } }));
+    });
+    await waitFor(() => expect(auth.loading).toBe(false));
+    expect(auth.user).toEqual(user);
+    expect(auth.accessToken).toBe('restored-token');
+    expect(adapter.mock.calls.map(([config]) => config.url)).toEqual(['/auth/refresh', '/auth/me']);
+  });
+
   it('uses the refreshed token for a 401 retry before React effects commit', async () => {
     await restoreSession();
     const sentTokens: string[] = [];
@@ -62,7 +79,7 @@ describe('AuthContext refresh', () => {
     expect(auth.accessToken).toBe('renewed-token');
   });
 
-  it('does not restore a token when a pending refresh finishes after logout', async () => {
+  it('waits for a pending refresh cookie before clearing the session on logout', async () => {
     await restoreSession();
     const pendingRefresh = deferred();
     adapter.mockImplementation(async config => config.url === '/auth/refresh'
@@ -72,16 +89,19 @@ describe('AuthContext refresh', () => {
     await act(async () => { renewal = auth.refreshAccessToken(); });
     // Attach the rejection handler before the deferred request settles.
     const settled = renewal.catch(() => null);
-    await act(async () => { await auth.logout(); });
+    let logout!: Promise<void>;
+    await act(async () => { logout = auth.logout(); });
+    expect(adapter.mock.calls.filter(([config]) => config.url === '/auth/logout')).toHaveLength(0);
     await act(async () => {
       pendingRefresh.resolve(response({}, { success: true, data: { accessToken: 'late-token' } }));
       await settled;
+      await logout;
     });
     expect(auth.user).toBeNull();
     expect(auth.accessToken).toBeNull();
   });
 
-  it('does not replace or log out a new account when an old request finishes refreshing', async () => {
+  it('finishes an old refresh before a different account can set its session cookie', async () => {
     await restoreSession();
     adapter.mockClear();
     const pendingRefresh = deferred();
@@ -94,10 +114,13 @@ describe('AuthContext refresh', () => {
     let request!: Promise<unknown>;
     await act(async () => { request = apiClient.get('/protected').catch(error => error); });
     await waitFor(() => { expect(adapter.mock.calls.some(([config]) => config.url === '/auth/refresh')).toBe(true); });
-    await act(async () => { await auth.login('next@example.com', 'password'); });
+    let login!: Promise<void>;
+    await act(async () => { login = auth.login('next@example.com', 'password'); });
+    expect(adapter.mock.calls.filter(([config]) => config.url === '/auth/login')).toHaveLength(0);
     await act(async () => {
       pendingRefresh.resolve(response({}, { success: true, data: { accessToken: 'old-account-token' } }));
       await request;
+      await login;
     });
     expect(auth.user).toEqual(nextUser);
     expect(auth.accessToken).toBe('next-user-token');
@@ -150,5 +173,132 @@ describe('AuthContext refresh', () => {
     expect(adapter.mock.calls.filter(([config]) => config.url === '/auth/refresh')).toHaveLength(0);
     expect(auth.user).toEqual(nextUser);
     expect(auth.accessToken).toBe('next-user-token');
+  });
+
+  it('clears local state after a rejected logout without refreshing the session', async () => {
+    await restoreSession();
+    adapter.mockClear();
+    adapter.mockImplementation(async config => {
+      throw new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', config, undefined, { ...response(config, {}), status: 401 });
+    });
+    await act(async () => { await auth.logout(); });
+    expect(adapter.mock.calls.map(([config]) => config.url)).toEqual(['/auth/logout']);
+    expect(auth.user).toBeNull();
+    expect(auth.accessToken).toBeNull();
+  });
+});
+
+describe('AuthContext Google sign-in', () => {
+  it('waits for initial restoration without publishing the old account over a pending Google sign-in', async () => {
+    const initialRefresh = deferred();
+    const googleExchange = deferred();
+    const googleUser = { id: 'google-user', email: 'google@example.com', name: 'Google User' };
+    adapter.mockImplementation(async config => {
+      if (config.url === '/auth/refresh') return initialRefresh.promise;
+      if (config.url === '/auth/google') return googleExchange.promise;
+      return response(config, { success: true, data: { user } });
+    });
+    render(<AuthProvider><Probe /></AuthProvider>);
+    let login!: Promise<void>;
+    await act(async () => { login = auth.googleLogin('credential'); });
+    expect(adapter.mock.calls.map(([config]) => config.url)).toEqual(['/auth/refresh']);
+    await act(async () => { initialRefresh.resolve(response({}, { success: true, data: { accessToken: 'old-token' } })); });
+    await waitFor(() => expect(adapter.mock.calls.some(([config]) => config.url === '/auth/google')).toBe(true));
+    expect(auth.user).toBeNull();
+    expect(auth.loading).toBe(true);
+    await act(async () => {
+      googleExchange.resolve(response({}, { success: true, data: { accessToken: 'google-token', user: googleUser } }));
+      await login;
+    });
+    expect(auth.user).toEqual(googleUser);
+    expect(auth.accessToken).toBe('google-token');
+    expect(auth.loading).toBe(false);
+  });
+
+  it('exchanges the credential with cookies and stores the validated session in memory', async () => {
+    await restoreSession();
+    const googleUser = { id: 'google-user', email: 'google@example.com', name: 'Google User' };
+    adapter.mockResolvedValue(response({}, { success: true, data: { accessToken: 'google-access-token', user: googleUser } }));
+    await act(async () => auth.googleLogin('signed-credential'));
+    const request = adapter.mock.calls.find(([config]) => config.url === '/auth/google')![0];
+    expect(JSON.parse(request.data)).toEqual({ credential: 'signed-credential' });
+    expect(request.withCredentials).toBe(true);
+    expect(auth.user).toEqual(googleUser);
+    expect(auth.accessToken).toBe('google-access-token');
+    expect(auth.loading).toBe(false);
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+  });
+
+  it.each([
+    { success: false },
+    { success: true, data: {} },
+    { success: true, data: { accessToken: 'incomplete', user: { id: 'id' } } },
+  ])('does not treat incomplete Google responses as a successful sign-in: %j', async data => {
+    await restoreSession();
+    adapter.mockResolvedValue(response({}, data));
+    await act(async () => { await expect(auth.googleLogin('credential')).rejects.toThrow('incomplete response'); });
+    expect(auth.user).toEqual(user);
+    expect(auth.accessToken).toBe('initial-token');
+    expect(auth.loading).toBe(false);
+  });
+
+  it('does not refresh or clear an existing session when Google rejects a credential', async () => {
+    await restoreSession();
+    adapter.mockClear();
+    adapter.mockImplementation(async config => {
+      throw new AxiosError('Unauthorized', 'ERR_BAD_REQUEST', config, undefined, {
+        ...response(config, { success: false, error: { message: 'Google sign-in expired. Please try again.' } }), status: 401,
+      });
+    });
+    await act(async () => { await expect(auth.googleLogin('expired')).rejects.toThrow('Google sign-in expired'); });
+    expect(auth.error).toBe('Google sign-in expired. Please try again.');
+    expect(auth.user).toEqual(user);
+    expect(adapter.mock.calls.map(([config]) => config.url)).toEqual(['/auth/google']);
+  });
+
+  it('waits for an old refresh cookie before a Google account signs in', async () => {
+    await restoreSession();
+    const pendingRefresh = deferred();
+    const googleUser = { id: 'google-user', email: 'google@example.com', name: 'Google User' };
+    adapter.mockImplementation(async config => config.url === '/auth/refresh'
+      ? pendingRefresh.promise
+      : response(config, { success: true, data: { accessToken: 'google-token', user: googleUser } }));
+    let renewal!: Promise<string | null>;
+    await act(async () => { renewal = auth.refreshAccessToken().catch(() => null); });
+    let login!: Promise<void>;
+    await act(async () => { login = auth.googleLogin('credential'); });
+    expect(adapter.mock.calls.filter(([config]) => config.url === '/auth/google')).toHaveLength(0);
+    await act(async () => {
+      pendingRefresh.resolve(response({}, { success: true, data: { accessToken: 'old-token' } }));
+      await renewal;
+      await login;
+    });
+    expect(auth.user).toEqual(googleUser);
+    expect(auth.accessToken).toBe('google-token');
+  });
+
+  it('holds a newly requested refresh until the Google exchange has set its cookie', async () => {
+    await restoreSession();
+    adapter.mockClear();
+    const googleExchange = deferred();
+    const googleUser = { id: 'google-user', email: 'google@example.com', name: 'Google User' };
+    adapter.mockImplementation(async config => config.url === '/auth/google'
+      ? googleExchange.promise
+      : response(config, { success: true, data: { accessToken: 'google-renewed-token' } }));
+    let login!: Promise<void>;
+    let renewal!: Promise<string | null>;
+    await act(async () => { login = auth.googleLogin('credential'); });
+    await waitFor(() => expect(adapter.mock.calls.some(([config]) => config.url === '/auth/google')).toBe(true));
+    await act(async () => { renewal = auth.refreshAccessToken().catch(() => null); });
+    expect(adapter.mock.calls.map(([config]) => config.url)).toEqual(['/auth/google']);
+    await act(async () => {
+      googleExchange.resolve(response({}, { success: true, data: { accessToken: 'google-token', user: googleUser } }));
+      await login;
+      await renewal;
+    });
+    expect(adapter.mock.calls.map(([config]) => config.url)).toEqual(['/auth/google', '/auth/refresh']);
+    expect(auth.user).toEqual(googleUser);
+    expect(auth.accessToken).toBe('google-token');
   });
 });

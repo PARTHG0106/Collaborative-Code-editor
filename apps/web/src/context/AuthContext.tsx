@@ -19,6 +19,7 @@ interface AuthContextType {
   serverWaking: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
+  googleLogin: (credential: string) => Promise<void>;
   register: (email: string, password: string, name: string) => Promise<void>;
   verifyEmail: (email: string, code: string) => Promise<void>;
   resendVerification: (email: string) => Promise<void>;
@@ -116,12 +117,52 @@ const authAxios = axios.create({
  */
 let refreshInFlight: Promise<string> | null = null;
 
+// These responses rotate or clear the same httpOnly cookie. A stale refresh
+// must finish before a sign-in or sign-out can write the next session cookie;
+// ignoring its access token in React cannot stop the browser applying it.
+let sessionCookieQueue: Promise<unknown> = Promise.resolve();
+function updateSessionCookie<T>(request: () => Promise<T>): Promise<T> {
+  const pending = sessionCookieQueue.then(request);
+  sessionCookieQueue = pending.catch(() => undefined);
+  return pending;
+}
+
 async function performRefresh(): Promise<string> {
-  const response = await authAxios.post('/auth/refresh');
+  const response = await updateSessionCookie(() => authAxios.post('/auth/refresh'));
   if (response.data && response.data.success) {
     return response.data.data.accessToken as string;
   }
   throw new Error('Refresh did not return a new access token');
+}
+
+interface RestoredSession {
+  token: string;
+  user: User;
+}
+
+// This request owns a rotating cookie. Reuse it across effect replays or a
+// provider remount, and never abort it before a subsequent sign-in exchange.
+let initialRestoreInFlight: Promise<RestoredSession | null> | null = null;
+function loadInitialSession(): Promise<RestoredSession | null> {
+  if (initialRestoreInFlight) return initialRestoreInFlight;
+  const pending = (async () => {
+    try {
+      const token = await performRefresh();
+      const profile = await authAxios.get('/auth/me', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const userData = profile.data?.data?.user;
+      if (profile.data?.success !== true || typeof userData?.id !== 'string' ||
+        typeof userData.email !== 'string' || typeof userData.name !== 'string') return null;
+      return { token, user: userData as User };
+    } catch {
+      // An absent or expired refresh cookie starts an unauthenticated session.
+      return null;
+    }
+  })();
+  initialRestoreInFlight = pending;
+  void pending.then(() => { if (initialRestoreInFlight === pending) initialRestoreInFlight = null; });
+  return pending;
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -141,6 +182,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState<boolean>(true);
   const [serverWaking, setServerWaking] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const mountedRef = useRef(false);
+  const initialRestorationRef = useRef<Promise<RestoredSession | null> | null>(null);
+  const initialRestorationFinishedRef = useRef(false);
+  const initialRestorationSupersededRef = useRef(false);
+  const pendingAuthOperationsRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
+
+  const waitForInitialRestoration = useCallback(() => {
+    if (!initialRestorationRef.current) {
+      initialRestorationRef.current = loadInitialSession().then(session => {
+        initialRestorationFinishedRef.current = true;
+        return session;
+      });
+    }
+    return initialRestorationRef.current;
+  }, []);
+
+  const beginAuthOperation = (supersedesRestoration = false) => {
+    pendingAuthOperationsRef.current += 1;
+    if (supersedesRestoration) initialRestorationSupersededRef.current = true;
+    setLoading(true);
+    const wakingTimer = setTimeout(() => {
+      if (mountedRef.current) setServerWaking(true);
+    }, WAKING_NOTICE_DELAY_MS);
+    return () => {
+      clearTimeout(wakingTimer);
+      pendingAuthOperationsRef.current -= 1;
+      if (mountedRef.current && pendingAuthOperationsRef.current === 0 && initialRestorationFinishedRef.current) {
+        setServerWaking(false);
+        setLoading(false);
+      }
+    };
+  };
 
   const clearError = useCallback(() => setError(null), []);
 
@@ -163,7 +241,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     setAccessToken(token);
     return token;
-  }, []);
+  }, [setAccessToken]);
 
   // Sync token to Axios headers
   useEffect(() => {
@@ -197,9 +275,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const url = originalRequest?.url || '';
         const isPublicAuthEndpoint =
           url.includes('/auth/login') ||
+          url.includes('/auth/google') ||
           url.includes('/auth/register') ||
           url.includes('/auth/verify') ||
           url.includes('/auth/resend-verification') ||
+          url.includes('/auth/logout') ||
           url.includes('/auth/refresh');
 
         // If error is 401 (Unauthorized), not already retried, and NOT a public auth endpoint
@@ -240,48 +320,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // Initial session restoration: check if user is already logged in.
-  // The refresh cookie is invisible to JavaScript, so unlike the old
-  // localStorage check there is no way to know in advance whether a session
-  // exists. Ask the server once and accept an unauthenticated answer.
-  const restoreSession = useCallback(async () => {
-    const wakingTimer = setTimeout(() => setServerWaking(true), WAKING_NOTICE_DELAY_MS);
-
-    try {
-      const refreshRes = await authAxios.post('/auth/refresh');
-
-      if (refreshRes.data && refreshRes.data.success) {
-        const token = refreshRes.data.data.accessToken;
-        setAccessToken(token);
-
-        // Fetch user profile using the new access token
-        const profileRes = await authAxios.get('/auth/me', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-
-        if (profileRes.data && profileRes.data.success) {
-          setUser(profileRes.data.data.user);
-        }
-      }
-    } catch {
-      // No active session or refresh expired: fail silently, user starts unauthenticated
-    } finally {
-      clearTimeout(wakingTimer);
-      setServerWaking(false);
-      setLoading(false);
-    }
-  }, []);
-
+  // Subscribe without making the request itself depend on the effect lifetime:
+  // Strict Mode must not rotate the cookie twice, and a canceled subscription
+  // must not restore an old account over an explicit sign-in or sign-out.
   useEffect(() => {
-    restoreSession();
-  }, [restoreSession]);
+    let active = true;
+    const sessionVersion = sessionVersionRef.current;
+    const wakingTimer = setTimeout(() => { if (active) setServerWaking(true); }, WAKING_NOTICE_DELAY_MS);
+    void waitForInitialRestoration().then(session => {
+      clearTimeout(wakingTimer);
+      if (!active) return;
+      if (sessionVersion === sessionVersionRef.current && !initialRestorationSupersededRef.current && session) {
+        setAccessToken(session.token);
+        setUser(session.user);
+      }
+      if (pendingAuthOperationsRef.current === 0) {
+        setServerWaking(false);
+        setLoading(false);
+      }
+    });
+    return () => {
+      active = false;
+      clearTimeout(wakingTimer);
+    };
+  }, [waitForInitialRestoration, setAccessToken]);
 
   const login = async (email: string, password: string) => {
     setError(null);
-    setLoading(true);
-    const wakingTimer = setTimeout(() => setServerWaking(true), WAKING_NOTICE_DELAY_MS);
+    const finishOperation = beginAuthOperation(true);
     try {
-      const response = await apiClient.post('/auth/login', { email, password });
+      await waitForInitialRestoration();
+      if (!mountedRef.current) return;
+      const response = await updateSessionCookie(() => apiClient.post('/auth/login', { email, password }));
       if (response.data && response.data.success) {
         const { accessToken: token, user: userData } = response.data.data;
         invalidatePendingRefresh();
@@ -298,16 +368,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       throw new Error(message);
     } finally {
-      clearTimeout(wakingTimer);
-      setServerWaking(false);
-      setLoading(false);
+      finishOperation();
+    }
+  };
+
+  const googleLogin = async (credential: string) => {
+    setError(null);
+    const finishOperation = beginAuthOperation(true);
+    try {
+      await waitForInitialRestoration();
+      if (!mountedRef.current) return;
+      const response = await updateSessionCookie(() => apiClient.post('/auth/google', { credential }));
+      const data = response.data?.data;
+      if (response.data?.success !== true || typeof data?.accessToken !== 'string' || !data.accessToken ||
+        typeof data?.user?.id !== 'string' || typeof data.user.email !== 'string' || typeof data.user.name !== 'string') {
+        throw new Error('Google sign-in returned an incomplete response. Please try again.');
+      }
+      invalidatePendingRefresh();
+      setAccessToken(data.accessToken);
+      setUser(data.user);
+    } catch (err: unknown) {
+      // Never log an Axios error here: its request body contains a credential.
+      const message = axios.isAxiosError(err)
+        ? (typeof err.response?.data?.error?.message === 'string'
+          ? err.response.data.error.message
+          : (err.response ? 'Google sign-in failed. Please try again.' : 'Google sign-in could not reach the server. Please try again.'))
+        : (err instanceof Error ? err.message : 'Google sign-in failed. Please try again.');
+      setError(message);
+      throw new Error(message);
+    } finally {
+      finishOperation();
     }
   };
 
   const register = async (email: string, password: string, name: string) => {
     setError(null);
-    setLoading(true);
-    const wakingTimer = setTimeout(() => setServerWaking(true), WAKING_NOTICE_DELAY_MS);
+    const finishOperation = beginAuthOperation();
     try {
       await apiClient.post('/auth/register', { email, password, name });
     } catch (err: any) {
@@ -315,17 +411,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setError(message);
       throw new Error(message);
     } finally {
-      clearTimeout(wakingTimer);
-      setServerWaking(false);
-      setLoading(false);
+      finishOperation();
     }
   };
 
   const verifyEmail = async (email: string, code: string) => {
     setError(null);
-    setLoading(true);
+    const finishOperation = beginAuthOperation(true);
     try {
-      const response = await apiClient.post('/auth/verify', { email, code });
+      await waitForInitialRestoration();
+      if (!mountedRef.current) return;
+      const response = await updateSessionCookie(() => apiClient.post('/auth/verify', { email, code }));
       if (response.data && response.data.success) {
         const { accessToken: token, user: userData } = response.data.data;
         invalidatePendingRefresh();
@@ -337,13 +433,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setError(message);
       throw new Error(message);
     } finally {
-      setLoading(false);
+      finishOperation();
     }
   };
 
   const resendVerification = async (email: string) => {
     setError(null);
-    setLoading(true);
+    const finishOperation = beginAuthOperation();
     try {
       await apiClient.post('/auth/resend-verification', { email });
     } catch (err: any) {
@@ -351,22 +447,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setError(message);
       throw new Error(message);
     } finally {
-      setLoading(false);
+      finishOperation();
     }
   };
 
   const logout = async () => {
-    setLoading(true);
+    const finishOperation = beginAuthOperation(true);
     try {
+      await waitForInitialRestoration();
+      if (!mountedRef.current) return;
       // The cookie identifies the session; the server revokes it and clears it.
-      await apiClient.post('/auth/logout');
+      await updateSessionCookie(() => apiClient.post('/auth/logout'));
     } catch {
       // Suppress backend logout errors
     } finally {
       invalidatePendingRefresh();
       setAccessToken(null);
       setUser(null);
-      setLoading(false);
+      finishOperation();
     }
   };
 
@@ -379,6 +477,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         serverWaking,
         error,
         login,
+        googleLogin,
         register,
         verifyEmail,
         resendVerification,

@@ -18,6 +18,8 @@ out/
 .env.d1-local
 # User-supplied Cloudflare credentials are local configuration, never source.
 cloudflared1cred.txt
+# Downloaded OAuth credentials are local configuration, never source.
+client_secret_*.json
 
 # IDE
 .vscode/

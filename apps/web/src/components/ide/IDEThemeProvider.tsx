@@ -18,8 +18,10 @@ export const useTheme = () => {
 
 export const IDEThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const stored = localStorage.getItem('ide-theme');
-    return (stored === 'light' || stored === 'dark') ? stored : 'dark';
+    try {
+      const stored = localStorage.getItem('ide-theme');
+      return (stored === 'light' || stored === 'dark') ? stored : 'dark';
+    } catch { return 'dark'; }
   });
 
   useEffect(() => {
@@ -29,7 +31,7 @@ export const IDEThemeProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem('ide-theme', theme);
+    try { localStorage.setItem('ide-theme', theme); } catch { /* Theme changes remain available for this session. */ }
   }, [theme]);
 
   const toggleTheme = () => setThemeState(prev => prev === 'dark' ? 'light' : 'dark');

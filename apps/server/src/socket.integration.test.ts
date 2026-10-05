@@ -20,6 +20,7 @@ vi.mock('./lib/prisma.js', () => {
     fileSystemItem: { findUnique: vi.fn(), update: vi.fn(), findMany: vi.fn() },
     workspaceMember: { findUnique: vi.fn() },
     fileVersion: { count: vi.fn(), create: vi.fn() },
+    chatMessage: { create: vi.fn() },
   };
   return { default: client, prisma: client };
 });
@@ -90,6 +91,69 @@ afterEach(async () => {
 });
 
 describe('collaboration socket sessions', () => {
+  it('allows viewers to chat and acknowledges only after the message is saved', async () => {
+    vi.mocked(prisma.workspaceMember.findUnique).mockResolvedValue({ role: 'VIEWER' } as any);
+    const a = await client();
+    const joined = event(a, 'workspace_users');
+    a.emit('join_workspace', { workspaceId });
+    await joined;
+    let finishSave!: () => void;
+    const saving = new Promise<void>(resolve => { finishSave = resolve; });
+    const savedMessage = { id: 'chat-1', workspaceId, message: 'A question', userId: 'viewer', createdAt: new Date() };
+    vi.mocked(prisma.chatMessage.create).mockImplementation((async () => {
+      await saving;
+      return savedMessage;
+    }) as any);
+    const received = event(a, 'chat_message');
+    const acknowledged = vi.fn();
+    const response = new Promise(resolve => a.emit('chat_message', { workspaceId, message: ' A question ' }, (reply: unknown) => {
+      acknowledged(reply);
+      resolve(reply);
+    }));
+    await vi.waitFor(() => expect(prisma.chatMessage.create).toHaveBeenCalled());
+    expect(acknowledged).not.toHaveBeenCalled();
+    finishSave();
+    expect(await response).toEqual({ success: true });
+    expect(await received).toMatchObject({ id: 'chat-1', message: 'A question' });
+    expect(prisma.chatMessage.create).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ message: 'A question' }) }));
+  });
+
+  it('acknowledges chat permission failures without saving a message', async () => {
+    vi.mocked(prisma.workspaceMember.findUnique).mockResolvedValue(null);
+    const a = await client();
+    const reply = await new Promise(resolve => a.emit('chat_message', { workspaceId, message: 'Hello' }, resolve));
+    expect(reply).toMatchObject({ success: false, error: expect.any(String) });
+    expect(prisma.chatMessage.create).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges storage failures so the sender can retain their draft', async () => {
+    vi.mocked(prisma.chatMessage.create).mockRejectedValue(new Error('Storage unavailable'));
+    const a = await client();
+    const received = vi.fn();
+    a.on('chat_message', received);
+    const reply = await new Promise(resolve => a.emit('chat_message', { workspaceId, message: 'Keep this draft' }, resolve));
+    expect(reply).toEqual({ success: false, error: 'Request failed. Please try again.' });
+    expect(received).not.toHaveBeenCalled();
+  });
+
+  it.each(['   ', 'x'.repeat(4001)])('rejects invalid chat content instead of silently discarding or truncating it', async message => {
+    const a = await client();
+    const reply = await new Promise(resolve => a.emit('chat_message', { workspaceId, message }, resolve));
+    expect(reply).toMatchObject({ success: false, error: expect.any(String) });
+    expect(prisma.chatMessage.create).not.toHaveBeenCalled();
+  });
+
+  it('still accepts chat messages from clients without acknowledgment callbacks', async () => {
+    const a = await client();
+    const joined = event(a, 'workspace_users');
+    a.emit('join_workspace', { workspaceId });
+    await joined;
+    vi.mocked(prisma.chatMessage.create).mockResolvedValue({ id: 'legacy-chat', message: 'Hello' } as any);
+    const received = event(a, 'chat_message');
+    a.emit('chat_message', { workspaceId, message: 'Hello' });
+    expect(await received).toMatchObject({ id: 'legacy-chat', message: 'Hello' });
+  });
+
   it('initializes simultaneous joins only once', async () => {
     const a = await client();
     const b = await client();

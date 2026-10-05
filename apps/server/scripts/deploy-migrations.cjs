@@ -175,7 +175,10 @@ function validateSchema(schema, { final = false } = {}) {
       if (required) failures.push(`Missing table ${table}`);
       continue;
     }
-    for (const [name, expected] of Object.entries(columns)) checkColumn(table, name, expected);
+    for (const [name, expected] of Object.entries(columns)) {
+      const googlePassword = table === 'users' && name === 'password_hash' && (final || column('users', 'google_subject'));
+      checkColumn(table, name, googlePassword ? c('text', true) : expected);
+    }
     if (!hasIndex(table, ['id'], { primary: true })) failures.push(`Missing primary key on ${table}.id`);
   }
   for (const [name, labels] of Object.entries(ENUMS)) {
@@ -186,6 +189,20 @@ function validateSchema(schema, { final = false } = {}) {
   }
   for (const [table, columns] of BASE_UNIQUE) {
     if (!hasIndex(table, columns, { unique: true })) failures.push(`Missing unique key on ${table}(${columns.join(', ')})`);
+  }
+  if (final || column('users', 'google_subject')) {
+    checkColumn('users', 'google_subject', c('text', true));
+    if (!hasIndex('users', ['google_subject'], { unique: true })) failures.push('Missing unique key on users(google_subject)');
+  }
+  if (final || schema.tables.includes('google_auth_challenges')) {
+    if (!schema.tables.includes('google_auth_challenges')) failures.push('Missing table google_auth_challenges');
+    else {
+      checkColumn('google_auth_challenges', 'token_hash', c());
+      checkColumn('google_auth_challenges', 'nonce_hash', c());
+      checkColumn('google_auth_challenges', 'expires_at', timestamp());
+      if (!hasIndex('google_auth_challenges', ['token_hash'], { primary: true })) failures.push('Missing primary key on google_auth_challenges.token_hash');
+      if (!hasIndex('google_auth_challenges', ['expires_at'])) failures.push('Missing index on google_auth_challenges(expires_at)');
+    }
   }
   for (const [table, columns] of EXECUTION_UNIQUE) {
     // Missing indexes on existing execution tables can be added safely by the

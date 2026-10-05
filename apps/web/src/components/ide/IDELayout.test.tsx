@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   onEditorChange: null as null | ((value: string, event: any) => void),
   onModelChange: null as null | ((event: any) => void),
   modelEOL: '\r\n',
+  setPosition: vi.fn(), revealLineInCenter: vi.fn(), editorFocus: vi.fn(),
+  deferEditorMount: false,
+  mountEditor: null as null | (() => void),
   remoteInput: null as null | ((input: string) => void),
   lineInput: null as null | ((input: string) => void),
   terminalManager: {
@@ -40,7 +43,10 @@ vi.mock('@monaco-editor/react', async () => {
     default: function MockEditor({ value, onChange, onMount, options, path }: any) {
       mocks.onEditorChange = onChange;
       useEffect(() => {
-        onMount?.({
+        const mount = () => onMount?.({
+          setPosition: mocks.setPosition,
+          revealLineInCenter: mocks.revealLineInCenter,
+          focus: mocks.editorFocus,
           getModel: () => ({
             getOffsetAt: (position: { column: number }) => position.column - 1,
             getEOL: () => mocks.modelEOL,
@@ -56,6 +62,8 @@ vi.mock('@monaco-editor/react', async () => {
           },
           onDidDispose: vi.fn(),
         }, { editor: { EndOfLineSequence: { LF: 0 } } });
+        mocks.mountEditor = mount;
+        if (!mocks.deferEditorMount) mount();
       }, []);
       useEffect(() => {
         // Monaco may notify after a controlled value replacement. Such a
@@ -119,6 +127,9 @@ describe('IDE collaborative editing', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    localStorage.clear();
+    mocks.deferEditorMount = false;
+    mocks.mountEditor = null;
     mocks.remoteInput = null;
     mocks.lineInput = null;
     mocks.terminalManager.getDimensions.mockReturnValue({ cols: 80, rows: 24 });
@@ -147,6 +158,64 @@ describe('IDE collaborative editing', () => {
   }
 
   const edits = () => socket.emit.mock.calls.filter(([event]) => event === 'edit_file');
+
+  it('jumps to a search result when opening a different file and when it is already open', async () => {
+    files = [file('alpha', 'header\nneedle\nfooter')];
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByText('alpha.ts');
+    fireEvent.keyDown(window, { key: 'F', ctrlKey: true, shiftKey: true });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search file contents' }), { target: { value: 'needle' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'alpha.ts, line 2: needle' }));
+    expect(mocks.setPosition).not.toHaveBeenCalled();
+    act(() => { socket.receive('file_init', { fileId: 'alpha', content: files[0].content, version: 0, persistedVersion: 0 }); });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 1 }));
+    expect(mocks.revealLineInCenter).toHaveBeenCalledWith(2);
+    expect(screen.getByText('Ln 2, Col 1')).toBeInTheDocument();
+    mocks.setPosition.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'alpha.ts, line 2: needle' }));
+    expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 1 });
+    expect(edits()).toHaveLength(0);
+  });
+
+  it('opens files through quick open and exposes a separate keyboard-operable close button', async () => {
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByText('alpha.ts');
+    fireEvent.keyDown(window, { key: 'p', ctrlKey: true });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Find a file by name or path' }), { target: { value: 'beta' } });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Find a file by name or path' }), { key: 'Enter' });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'beta.ts' })).toHaveAttribute('aria-pressed', 'true');
+    await waitFor(() => expect(mocks.editorFocus).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Close beta.ts' }));
+    expect(screen.queryByRole('textbox', { name: 'Code editor' })).not.toBeInTheDocument();
+  });
+
+  it('honors a pending search line when synchronization finishes before Monaco loads', async () => {
+    mocks.deferEditorMount = true;
+    files = [file('alpha', 'header\nneedle\nfooter')];
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByText('alpha.ts');
+    fireEvent.keyDown(window, { key: 'F', ctrlKey: true, shiftKey: true });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search file contents' }), { target: { value: 'needle' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'alpha.ts, line 2: needle' }));
+    await act(async () => {
+      socket.receive('file_init', { fileId: 'alpha', content: files[0].content, version: 0, persistedVersion: 0 });
+      await new Promise(resolve => setTimeout(resolve, 30));
+    });
+    expect(mocks.setPosition).not.toHaveBeenCalled();
+    act(() => { mocks.mountEditor?.(); });
+    expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 1 });
+    expect(screen.getByText('Ln 2, Col 1')).toBeInTheDocument();
+  });
+
+  it('restores the previous panel choices after leaving focus mode', async () => {
+    await openAlpha();
+    expect(screen.getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Enter focus mode' }));
+    expect(screen.getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(screen.getByRole('button', { name: 'Exit focus mode' }));
+    expect(screen.getByRole('button', { name: 'Explorer' })).toHaveAttribute('aria-pressed', 'true');
+  });
 
   it('routes execution input and Stop to the acknowledged session and ignores unrelated completion', async () => {
     await openAlpha();

@@ -1,6 +1,8 @@
-import { motion } from "framer-motion";
+import { motion, useReducedMotion } from "framer-motion";
 
 export function FloatingPaths({ position }: { position: number }) {
+  const reducedMotion = useReducedMotion();
+  if (reducedMotion) return null;
   const paths = Array.from({ length: 36 }, (_, i) => ({
     id: i,
     d: `M-${380 - i * 5 * position} -${189 + i * 6}C-${380 - i * 5 * position} -${189 + i * 6} -${312 - i * 5 * position} ${216 - i * 6} ${152 - i * 5 * position} ${343 - i * 6}C${616 - i * 5 * position} ${470 - i * 6} ${684 - i * 5 * position} ${875 - i * 6} ${684 - i * 5 * position} ${875 - i * 6}`,
@@ -8,7 +10,7 @@ export function FloatingPaths({ position }: { position: number }) {
   }));
 
   return (
-    <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
+    <div aria-hidden="true" className="absolute inset-0 pointer-events-none overflow-hidden z-0">
       <svg className="w-full h-full text-[var(--accent-primary)]/5" viewBox="0 0 696 316" fill="none">
         <title>Background Paths</title>
         {paths.map((path) => (
@@ -25,7 +27,7 @@ export function FloatingPaths({ position }: { position: number }) {
               pathOffset: [0, 1, 0],
             }}
             transition={{
-              duration: 20 + Math.random() * 10,
+              duration: 20 + (path.id % 10),
               repeat: Infinity,
               ease: "linear",
             }}

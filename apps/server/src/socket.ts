@@ -402,10 +402,18 @@ export function initSocketServer(httpServer: HTTPServer): SocketIOServer {
       roles: WorkspaceRole[],
       handler: (payload: any, role: WorkspaceRole) => void | Promise<void>,
     ): void {
-      socket.on(event, (payload: any = {}) => {
+      socket.on(event, (payload: any = {}, acknowledge?: unknown) => {
         enqueue(event, async () => {
-          const role = await requireWorkspaceRole(currentUser.id, payload?.workspaceId, roles);
-          if (socket.connected) await handler(payload, role);
+          const reply = typeof acknowledge === 'function' ? acknowledge : undefined;
+          try {
+            const role = await requireWorkspaceRole(currentUser.id, payload?.workspaceId, roles);
+            if (!socket.connected) return;
+            await handler(payload, role);
+            reply?.({ success: true });
+          } catch (error) {
+            reply?.({ success: false, error: error instanceof AuthzError ? error.message : 'Request failed. Please try again.' });
+            throw error;
+          }
         });
       });
     }
@@ -464,16 +472,19 @@ export function initSocketServer(httpServer: HTTPServer): SocketIOServer {
     // ----------------------------------------------------
     // WORKSPACE CHAT HANDLERS
     // ----------------------------------------------------
-    onWorkspace('chat_message', WRITE_ROLES, async ({ workspaceId, message }) => {
+    onWorkspace('chat_message', READ_ROLES, async ({ workspaceId, message }) => {
       if (!message || typeof message !== 'string' || message.trim() === '') {
-        return;
+        throw new AuthzError('Message content is required');
+      }
+      if (message.trim().length > 4000) {
+        throw new AuthzError('Messages must be 4,000 characters or fewer.');
       }
 
       const newMessage = await prisma.chatMessage.create({
         data: {
           workspaceId,
           userId: currentUser.id,
-          message: message.slice(0, 4000),
+          message: message.trim(),
         },
         include: {
           user: {

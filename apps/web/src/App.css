@@ -375,6 +375,82 @@
 }
 
 /* Auth Pages Styling */
+.mouse-glow {
+  background: radial-gradient(600px circle at var(--glow-x, 50%) var(--glow-y, 35%), rgba(var(--accent-primary-rgb), 0.08), transparent 40%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.skip-link {
+  position: absolute;
+  top: 0.75rem;
+  left: 0.75rem;
+  z-index: 100;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: translateY(0);
+}
+
+.skip-link:focus-visible,
+.auth-card a:focus-visible,
+.auth-card button:focus-visible,
+.header-nav a:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 3px;
+}
+
+.auth-card input[name="password"] {
+  padding-right: 3.5rem;
+}
+
+.auth-card .input-wrapper input {
+  font-size: 1rem;
+}
+
+.password-visibility-toggle {
+  position: absolute;
+  right: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.password-visibility-toggle:hover {
+  color: var(--text-primary);
+  background: var(--bg-tertiary);
+}
+
+.password-visibility-toggle:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.auth-success-alert {
+  color: var(--accent-success);
+}
+
 .auth-container {
   min-height: 100vh;
   display: flex;
@@ -481,10 +557,14 @@
   gap: 0.75rem;
   background: rgba(239, 68, 68, 0.08);
   border: 1px solid rgba(239, 68, 68, 0.25);
-  color: #f87171;
+  color: var(--accent-danger);
   padding: 0.75rem 1rem;
   border-radius: 8px;
   font-size: 0.875rem;
+}
+
+.dark .auth-error-alert {
+  color: #fca5a5;
 }
 
 .alert-icon {

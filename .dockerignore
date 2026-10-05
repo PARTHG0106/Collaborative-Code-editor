@@ -18,5 +18,7 @@ apps/server/src/generated
 **/.env
 **/.env.*
 cloudflared1cred.txt
+client_secret_*.json
+**/client_secret_*.json
 .agents
 .claude

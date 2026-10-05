@@ -146,6 +146,56 @@ describe('production migration preflight against PostgreSQL', () => {
     expect((await inspectSchema(db)).tables).not.toContain('_prisma_migrations');
   });
 
+  it('preserves password accounts and enforces unique Google identities after the additive migration', async () => {
+    await applyJune();
+    await seedContent();
+    await deploy({ db, migrations, run: prismaRunner(), log: vi.fn() });
+    expect((await db.query('SELECT password_hash, google_subject, is_verified FROM users')).rows).toEqual([
+      { password_hash: 'password-hash', google_subject: null, is_verified: false },
+    ]);
+    await db.exec(`INSERT INTO users (id, email, name, updated_at, google_subject, is_verified)
+      VALUES ('google', 'google@example.test', 'Google User', CURRENT_TIMESTAMP, 'google-subject', true)`);
+    expect((await db.query("SELECT password_hash FROM users WHERE id = 'google'")).rows).toEqual([{ password_hash: null }]);
+    await expect(db.exec(`INSERT INTO users (id, email, name, updated_at, google_subject)
+      VALUES ('duplicate', 'different@example.test', 'Duplicate', CURRENT_TIMESTAMP, 'google-subject')`))
+      .rejects.toThrow('users_google_subject_key');
+    await db.exec('DROP INDEX users_google_subject_key');
+    const schema = await inspectSchema(db);
+    expect(() => validateSchema(schema, { final: true })).toThrow('users(google_subject)');
+  });
+
+  it('upgrades a compatible Google db-push schema without recreating identities or challenges', async () => {
+    for (const migration of migrations) await db.exec(migration.sql);
+    await seedContent();
+    await db.exec(`INSERT INTO users (id, email, name, updated_at, google_subject, is_verified)
+      VALUES ('google', 'google@example.test', 'Google User', CURRENT_TIMESTAMP, 'google-subject', true);
+      INSERT INTO google_auth_challenges (token_hash, nonce_hash, expires_at)
+      VALUES ('cookie-hash', 'nonce-hash', CURRENT_TIMESTAMP + INTERVAL '5 minutes')`);
+    const run = prismaRunner();
+    await deploy({ db, migrations, run, log: vi.fn() });
+    expect(run.mock.calls).toEqual([
+      ...HISTORICAL_CHECKPOINT.map(name => [['resolve', '--applied', name]]), [['deploy']],
+    ]);
+    expect((await db.query('SELECT id, password_hash, google_subject, is_verified FROM users ORDER BY id')).rows).toEqual([
+      { id: 'google', password_hash: null, google_subject: 'google-subject', is_verified: true },
+      { id: 'user', password_hash: 'password-hash', google_subject: null, is_verified: false },
+    ]);
+    expect((await db.query('SELECT token_hash, nonce_hash FROM google_auth_challenges')).rows).toEqual([
+      { token_hash: 'cookie-hash', nonce_hash: 'nonce-hash' },
+    ]);
+    expect((await db.query('SELECT name FROM workspaces')).rows).toEqual([{ name: 'Keep this workspace' }]);
+    validateSchema(await inspectSchema(db), { final: true });
+  });
+
+  it('refuses an incompatible Google db-push schema before recording history or deploying', async () => {
+    for (const migration of migrations) await db.exec(migration.sql);
+    await db.exec('ALTER TABLE google_auth_challenges ALTER COLUMN nonce_hash DROP NOT NULL');
+    const run = vi.fn();
+    await expect(deploy({ db, migrations, run, log: vi.fn() })).rejects.toThrow('google_auth_challenges.nonce_hash');
+    expect(run).not.toHaveBeenCalled();
+    expect((await inspectSchema(db)).tables).not.toContain('_prisma_migrations');
+  });
+
   it.each([
     ['column nullability', 'ALTER TABLE users ALTER COLUMN name DROP NOT NULL', 'users.name'],
     ['column type', 'ALTER TABLE file_versions ALTER COLUMN version TYPE BIGINT', 'file_versions.version'],

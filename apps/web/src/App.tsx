@@ -4,9 +4,9 @@ import { AuthProvider } from './context/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
-import { FloatingPaths } from './components/ui/FloatingPaths';
 import { SpeedInsights } from '@vercel/speed-insights/react';
 import './App.css';
+import './site.css';
 
 // Landing and Login stay in the entry chunk: they are the first paint for a
 // cold visitor, so a second network round trip there would be a regression.
@@ -24,7 +24,7 @@ const IDELayout = lazy(() =>
 /** Shown while a lazy route chunk is in flight. */
 const RouteFallback: React.FC = () => (
   <div className="min-h-screen w-full flex items-center justify-center">
-    <div className="text-[var(--text-secondary)] text-sm animate-pulse">Loading…</div>
+    <div className="site-muted text-sm" role="status">Loading…</div>
   </div>
 );
 
@@ -53,16 +53,11 @@ function App() {
             }
           />
 
-          {/* Standard routes with floating paths background */}
+          {/* Public pages and workspace management share a restrained site theme. */}
           <Route
             path="*"
             element={
-              <div className="min-h-screen w-full bg-[var(--bg-primary)] overflow-hidden relative">
-                <div className="absolute inset-0 z-0 pointer-events-none">
-                  <FloatingPaths position={1} />
-                  <FloatingPaths position={-1} />
-                </div>
-                <div className="relative z-10 w-full min-h-screen flex flex-col">
+              <div className="site-shell">
                   <Suspense fallback={<RouteFallback />}>
                     <Routes>
                       <Route path="/" element={<Landing />} />
@@ -79,7 +74,6 @@ function App() {
                       />
                     </Routes>
                   </Suspense>
-                </div>
               </div>
             }
           />

@@ -1,0 +1,50 @@
+.google-sign-in {
+  margin-bottom: 24px;
+}
+
+.google-sign-in-button {
+  width: 100%;
+  min-height: 40px;
+}
+
+.google-sign-in-button[aria-disabled="true"] {
+  pointer-events: none;
+  opacity: 0.6;
+}
+
+.google-sign-in-button:empty {
+  min-height: 0;
+}
+
+.google-sign-in-status,
+.google-sign-in-error {
+  margin: 8px 0;
+  color: var(--site-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.google-sign-in-error {
+  color: var(--site-danger);
+}
+
+.google-sign-in-retry {
+  width: 100%;
+}
+
+.google-sign-in-divider {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 24px;
+  color: var(--site-muted);
+  font-size: 12px;
+}
+
+.google-sign-in-divider::before,
+.google-sign-in-divider::after {
+  flex: 1;
+  height: 1px;
+  background: var(--site-border);
+  content: '';
+}

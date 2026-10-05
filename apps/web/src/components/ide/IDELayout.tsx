@@ -4,6 +4,9 @@ import { useNavigate } from 'react-router-dom';
 import { IDEThemeProvider, useTheme } from './IDEThemeProvider';
 import { ActivityBar, ActivityType } from './ActivityBar';
 import { TopBar } from './TopBar';
+import { QuickOpen } from './QuickOpen';
+import { getFilePath } from './filePaths';
+import { useEditorPreferences } from './hooks/useEditorPreferences';
 import { ExplorerPanel } from './sidebar/ExplorerPanel';
 import { SearchPanel } from './sidebar/SearchPanel';
 import { CollaboratorsPanel } from './sidebar/CollaboratorsPanel';
@@ -76,6 +79,7 @@ interface WorkspaceDetails {
 const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ workspaceId, onBack }) => {
   const { apiClient, user } = useAuth();
   const { theme } = useTheme();
+  const { preferences, setPreferences } = useEditorPreferences();
 
   // Workspace data
   const [workspace, setWorkspace] = useState<WorkspaceDetails | null>(null);
@@ -86,7 +90,12 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   // UI state
   const [activity, setActivity] = useState<ActivityType>('explorer');
   const [sidebarVisible, setSidebarVisible] = useState(true);
-  const [rightPanelOpen, setRightPanelOpen] = useState(true);
+  const [rightPanelOpen, setRightPanelOpen] = useState(() => window.innerWidth > 1024);
+  const [chatTabVisible, setChatTabVisible] = useState(true);
+  const [quickOpen, setQuickOpen] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState({ lineNumber: 1, column: 1 });
+  const previousPanelsRef = useRef({ sidebar: true, right: true });
+  const pendingNavigationRef = useRef<{ fileId: string; lineNumber?: number } | null>(null);
   const [openTabs, setOpenTabs] = useState<FileSystemItem[]>([]);
   const [preview, setPreview] = useState<{ fileId: string; content: string } | null>(null);
 
@@ -141,6 +150,16 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || !(e.ctrlKey || e.metaKey)) return;
+      if (e.key.toLowerCase() === 'p' && !e.shiftKey && !e.altKey) {
+        e.preventDefault(); setQuickOpen(value => !value); return;
+      }
+      if (e.key.toLowerCase() === 'b' && !e.shiftKey && !e.altKey) {
+        e.preventDefault(); setSidebarVisible(value => !value); return;
+      }
+      if (e.key.toLowerCase() === 'f' && e.shiftKey) {
+        e.preventDefault(); setActivity('search'); setSidebarVisible(true); return;
+      }
       // Toggle Terminal (Ctrl+`)
       if ((e.ctrlKey || e.metaKey) && e.key === '`') {
         e.preventDefault();
@@ -154,7 +173,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [terminalOpen]);
 
-  const ws = useWorkspaceSocket(workspaceId, rightPanelOpen);
+  const ws = useWorkspaceSocket(workspaceId, rightPanelOpen && chatTabVisible);
   useEffect(() => () => {
     const execution = remoteExecutionRef.current;
     if (!execution) return;
@@ -182,6 +201,29 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const editorRef = useRef<any>(null);
   const monacoRef = useRef<any>(null);
   const decorationsRef = useRef<Map<string, string[]>>(new Map());
+  const revealPendingLine = useCallback(() => {
+    const pending = pendingNavigationRef.current;
+    const editor = editorRef.current;
+    if (!pending || pending.fileId !== fs.activeFileId || !editor || activeFile?.name.endsWith('.ipynb')) return;
+    if (pending.lineNumber) {
+      if (!collaboration.ready) return;
+      const lineNumber = Math.min(pending.lineNumber, editor.getModel()?.getLineCount?.() ?? pending.lineNumber);
+      editor.setPosition({ lineNumber, column: 1 });
+      editor.revealLineInCenter(lineNumber);
+      setCursorPosition({ lineNumber, column: 1 });
+    }
+    editor.focus();
+    pendingNavigationRef.current = null;
+  }, [fs.activeFileId, collaboration.ready, activeFile?.name]);
+  // Monaco retains its initial onMount callback while its loader is pending.
+  const revealPendingLineRef = useRef(revealPendingLine);
+  revealPendingLineRef.current = revealPendingLine;
+
+  useEffect(() => {
+    // Let Monaco receive the synchronized content before navigating in it.
+    const frame = requestAnimationFrame(revealPendingLine);
+    return () => cancelAnimationFrame(frame);
+  }, [revealPendingLine]);
 
   useEffect(() => {
     terminalManager?.setRawMode(!isExecuting);
@@ -277,6 +319,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
 
   const handleEditorMount = (editor: any, monaco: any) => {
     editorRef.current = editor;
+    setCursorPosition({ lineNumber: 1, column: 1 });
     monacoRef.current = monaco;
     // Monaco normalizes line endings in its model. Keep its view in LF and
     // translate positions against the file's original text at the boundary.
@@ -291,12 +334,17 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     });
     const fileId = fs.activeFileId;
     const subscription = editor.onDidChangeCursorPosition((event: any) => {
+      setCursorPosition({ lineNumber: event.position.lineNumber || 1, column: event.position.column });
       // Token refresh can replace the socket without remounting this editor.
       const socket = cursorSocketRef.current;
       const model = editor.getModel();
       if (socket?.connected && fileId && model) socket.emit('cursor_move', { fileId, cursor: { offset: editorOffsetToDocumentOffset(editorSourceRef.current, model.getOffsetAt(event.position)) } });
     });
-    editor.onDidDispose(() => { subscription.dispose(); modelSubscription?.dispose(); });
+    editor.onDidDispose(() => {
+      subscription.dispose(); modelSubscription?.dispose();
+      if (editorRef.current === editor) editorRef.current = null;
+    });
+    revealPendingLineRef.current();
   };
 
   // Fetch versions when snapshots panel is active
@@ -307,16 +355,32 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     try {
       const res = await apiClient.get(`/workspaces/${workspaceId}/files/${fileId}/versions`);
       if (activeFileIdRef.current === fileId && res.data?.success) setVersions(res.data.data);
-    } catch { /* snapshot list is best-effort */ } finally { if (activeFileIdRef.current === fileId) setVersionsLoading(false); }
+    } catch { setError('Could not load snapshots. Reopen the Snapshots panel to try again.'); } finally { if (activeFileIdRef.current === fileId) setVersionsLoading(false); }
   }, [fs.activeFileId, workspaceId, apiClient]);
 
   useEffect(() => { if (activity === 'snapshots') fetchVersions(); }, [activity, fs.activeFileId, fetchVersions]);
 
   // Handlers
-  const selectFile = (file: FileSystemItem) => {
+  const selectFile = (file: FileSystemItem, lineNumber?: number) => {
+    if (lineNumber && !file.name.endsWith('.ipynb')) {
+      pendingNavigationRef.current = { fileId: file.id, lineNumber };
+      if (fs.activeFileId === file.id && !preview) revealPendingLine();
+    } else pendingNavigationRef.current = null;
     fs.setActiveFileId(file.id);
     setPreview(null);
     setOpenTabs(prev => prev.find(t => t.id === file.id) ? prev : [...prev, file]);
+    if (window.innerWidth <= 768) setSidebarVisible(false);
+  };
+
+  const toggleFocusMode = () => {
+    if (!sidebarVisible && !rightPanelOpen) {
+      setSidebarVisible(previousPanelsRef.current.sidebar);
+      setRightPanelOpen(previousPanelsRef.current.right);
+    } else {
+      previousPanelsRef.current = { sidebar: sidebarVisible, right: rightPanelOpen };
+      setSidebarVisible(false);
+      setRightPanelOpen(false);
+    }
   };
 
   const closeTab = (id: string) => {
@@ -334,17 +398,20 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   };
 
   const handleInvite = async (email: string, role: 'EDITOR' | 'VIEWER') => {
+    setError(null);
     try {
       const res = await apiClient.post(`/workspaces/${workspaceId}/members`, { email, role });
-      if (res.data?.success) setWorkspace(prev => prev ? { ...prev, members: [...prev.members, res.data.data] } : null);
-    } catch (e: any) { setError(e.response?.data?.error?.message || 'Failed to invite'); }
+      if (!res.data?.success) throw new Error('Invite failed');
+      setWorkspace(prev => prev ? { ...prev, members: [...prev.members, res.data.data] } : null);
+      return true;
+    } catch (e: any) { setError(e.response?.data?.error?.message || 'Failed to invite. Please try again.'); return false; }
   };
 
   const handleRoleChange = async (userId: string, role: 'EDITOR' | 'VIEWER') => {
     try {
       const res = await apiClient.patch(`/workspaces/${workspaceId}/members/${userId}`, { role });
       if (res.data?.success) setWorkspace(prev => prev ? { ...prev, members: prev.members.map(m => m.userId === userId ? { ...m, role: res.data.data.role } : m) } : null);
-    } catch { /* role change failed; UI will reflect server state on next load */ }
+    } catch { setError('Could not change this member’s role. Please try again.'); }
   };
 
   const handleRemoveMember = async (userId: string) => {
@@ -354,19 +421,22 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
       await apiClient.delete(`/workspaces/${workspaceId}/members/${userId}`);
       if (isSelf) onBack();
       else setWorkspace(prev => prev ? { ...prev, members: prev.members.filter(m => m.userId !== userId) } : null);
-    } catch { /* removal failed; membership list unchanged */ }
+    } catch { setError(isSelf ? 'Could not leave the workspace. Please try again.' : 'Could not remove this member. Please try again.'); }
   };
 
   const handleSaveSettings = async (name: string, desc: string) => {
+    setError(null);
     try {
       const res = await apiClient.patch(`/workspaces/${workspaceId}`, { name, description: desc });
-      if (res.data?.success) setWorkspace(prev => prev ? { ...prev, name: res.data.data.name, description: res.data.data.description } : null);
-    } catch { /* settings save failed; keep current values */ }
+      if (!res.data?.success) throw new Error('Save failed');
+      setWorkspace(prev => prev ? { ...prev, name: res.data.data.name, description: res.data.data.description } : null);
+      return true;
+    } catch { setError('Could not save workspace settings. Your draft is still available.'); return false; }
   };
 
   const handleDeleteWorkspace = async () => {
     if (!window.confirm('Delete this workspace permanently?')) return;
-    try { await apiClient.delete(`/workspaces/${workspaceId}`); onBack(); } catch { /* delete failed; stay on the workspace */ }
+    try { await apiClient.delete(`/workspaces/${workspaceId}`); onBack(); } catch { setError('Could not delete the workspace. Please try again.'); }
   };
 
   const handleEditorAreaClick = () => {
@@ -382,7 +452,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     try {
       const res = await apiClient.post(`/workspaces/${workspaceId}/files/${fileId}/versions`);
       if (activeFileIdRef.current === fileId && res.data?.success) setVersions(prev => [res.data.data, ...prev]);
-    } catch { /* snapshot creation failed */ } finally { setActionLoading(false); }
+    } catch { setError('Could not create a snapshot. Please try again.'); } finally { setActionLoading(false); }
   };
 
   const handlePreviewVersion = async (versionId: string) => {
@@ -604,6 +674,10 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
         onBack={() => { if (!collaboration.hasPendingChanges || window.confirm('Changes or recovered copies are still unsaved. Leave this workspace?')) onBack(); }}
         rightPanelOpen={rightPanelOpen}
         onToggleRightPanel={() => setRightPanelOpen(p => !p)}
+        unreadMessages={ws.unreadMessages}
+        onQuickOpen={() => setQuickOpen(true)}
+        focusMode={!sidebarVisible && !rightPanelOpen}
+        onToggleFocusMode={toggleFocusMode}
       />
       {(error || collaboration.error || ws.permissionError) && <div role="alert" style={{ padding: 8, color: 'var(--ide-danger)' }}>{error || collaboration.error || ws.permissionError}</div>}
       {collaboration.recoveries.map(draft => <div role="alert" key={`${draft.fileId}-${draft.id}`} style={{ padding: 8 }}>
@@ -654,6 +728,8 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
               workspace={workspace} isOwner={isOwner} canModify={canModify}
               onSave={handleSaveSettings} onDelete={handleDeleteWorkspace}
               onLeave={() => handleRemoveMember(user?.id || '')}
+              editorPreferences={preferences}
+              onEditorPreferencesChange={setPreferences}
             />
           )}
         </div>
@@ -663,18 +739,19 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           <div className="ide-tabs-bar">
             <div style={{ display: 'flex', flex: 1, overflowX: 'auto', scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
               {openTabs.map(tab => (
-                <button
+                <div
                   key={tab.id}
                   className={`ide-tab ${fs.activeFileId === tab.id ? 'active' : ''}`}
-                  onClick={() => selectFile(tab)}
                   style={{ flexShrink: 0 }}
                 >
+                  <button className="ide-tab-select" aria-pressed={fs.activeFileId === tab.id} title={getFilePath(tab, fs.files)} onClick={() => selectFile(tab)}>
                   <File size={12} style={{ color: 'var(--ide-accent)', flexShrink: 0 }} />
                   {tab.name}
-                  <span className="ide-tab-close" onClick={e => { e.stopPropagation(); closeTab(tab.id); }}>
+                  </button>
+                  <button className="ide-tab-close" aria-label={`Close ${tab.name}`} onClick={() => closeTab(tab.id)}>
                     <X size={10} />
-                  </span>
-                </button>
+                  </button>
+                </div>
               ))}
             </div>
             
@@ -682,6 +759,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
             <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', paddingRight: '8px', gap: '4px' }}>
               {!isExecuting && (
                 <select
+                  aria-label="Run code using"
                   value={runTarget}
                   onChange={(e) => setRunTarget(e.target.value as any)}
                   className="ide-btn"
@@ -757,17 +835,17 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
                   }}
                   onMount={handleEditorMount}
                   options={{
-                    minimap: { enabled: true },
-                    fontSize: 14,
+                    minimap: { enabled: preferences.minimap },
+                    fontSize: preferences.fontSize,
                     fontFamily: "var(--ide-font-mono), monospace",
                     lineNumbers: 'on',
                     roundedSelection: true,
                     scrollBeyondLastLine: false,
                     readOnly: !canModify || !collaboration.ready,
                     automaticLayout: true,
-                    tabSize: 2,
+                    tabSize: preferences.tabSize,
                     insertSpaces: true,
-                    wordWrap: 'on',
+                    wordWrap: preferences.wordWrap ? 'on' : 'off',
                     padding: { top: 12 },
                   }}
                   loading={<div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ide-text-muted)' }}><Loader2 size={20} className="animate-spin" /></div>}
@@ -779,6 +857,8 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
               <TerminalIcon size={40} style={{ opacity: 0.3, color: 'var(--ide-accent)' }} />
               <h3>SyncScript</h3>
               <p>Select a file from the explorer to start editing, or create a new file.</p>
+              <button className="ide-btn primary" onClick={() => setQuickOpen(true)}>Open a file <kbd>Ctrl/⌘ P</kbd></button>
+              <p className="ide-help-text">Ctrl/⌘ B: sidebar · Ctrl/⌘ Shift F: search · Ctrl/⌘ `: terminal</p>
             </div>
           )}
 
@@ -798,19 +878,28 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           <div className="ide-statusbar">
             <div className="ide-statusbar-left">
               {activeFile && <span className="ide-statusbar-item">{editorLang}</span>}
-              {activeFile && <span className="ide-statusbar-item">Ln {editorContent.split('\n').length}</span>}
+              {activeFile && <span className="ide-statusbar-item" title={`${editorContent.split('\n').length} lines`}>Ln {cursorPosition.lineNumber}, Col {cursorPosition.column}</span>}
+              {!canModify && <span className="ide-statusbar-item">Read-only</span>}
             </div>
             <div className="ide-statusbar-right">
               <span className="ide-statusbar-item" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
                 <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: agentConnected ? 'var(--ide-success)' : 'var(--ide-text-muted)', display: 'inline-block' }} />
                 {agentConnected ? 'Agent' : 'No Agent'}
               </span>
-              <span className="ide-statusbar-item">{!collaboration.ready && fs.activeFileId ? 'Reconnecting...' : collaboration.saveStatus === 'saved' ? '✓ Saved' : collaboration.saveStatus === 'saving' ? 'Saving...' : '● Unsaved'}</span>
+              <span className="ide-statusbar-item" role="status" title="Edits save automatically when connected">{!collaboration.ready && fs.activeFileId ? 'Reconnecting...' : collaboration.saveStatus === 'saved' ? '✓ Saved' : collaboration.saveStatus === 'saving' ? 'Saving...' : '● Unsaved'}</span>
             </div>
           </div>
         </div>
 
         <RightPanel
+          workspaceId={workspaceId}
+          chatHistoryLoading={ws.chatHistoryLoading}
+          chatHistoryError={ws.chatHistoryError}
+          onRetryChatHistory={ws.retryChatHistory}
+          onChatVisibilityChange={setChatTabVisible}
+          unreadMessages={ws.unreadMessages}
+          isSendingChat={ws.isSendingChat}
+          chatSendError={ws.chatSendError}
           collapsed={!rightPanelOpen}
           chatMessages={ws.chatMessages}
           typingUsers={ws.typingUsers}
@@ -823,6 +912,11 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
           currentUserId={user?.id || ''}
         />
       </div>
+      {quickOpen && <QuickOpen files={fs.files} openFileIds={openTabs.map(file => file.id)} onClose={() => setQuickOpen(false)} onSelect={file => {
+        selectFile(file);
+        pendingNavigationRef.current = { fileId: file.id };
+        requestAnimationFrame(() => revealPendingLineRef.current());
+      }} />}
     </div>
   );
 };

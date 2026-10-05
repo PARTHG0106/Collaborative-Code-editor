@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, Mocked } from 'vitest';
-import { render, screen, waitFor, fireEvent } from '@testing-library/react';
+import { act, render, screen, waitFor, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import App from './App';
 import axios from 'axios';
@@ -34,6 +34,7 @@ const mockedAxios = axios as unknown as Mocked<typeof axios> & {
 describe('Frontend App Component & Auth Flows', () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    window.history.replaceState({}, '', '/');
 
     // Default implementations to prevent unhandled rejections during restoreSession
     mockedAxios.post.mockImplementation((url: string) => {
@@ -79,27 +80,25 @@ describe('Frontend App Component & Auth Flows', () => {
       return Promise.resolve({ data: { success: true } });
     });
 
-    render(<App />);
+    await act(async () => { render(<App />); });
 
-    expect(screen.getByText('SyncScript')).toBeInTheDocument();
-    // The hero heading renders as a plain span ("Collaborative Coding,"). The
-    // matcher normalizes whitespace, so match the visible text directly.
-    expect(screen.getByText('Collaborative Coding,')).toBeInTheDocument();
-    expect(screen.getByText('Querying API status...')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'SyncScript home' })).toHaveTextContent('syncscript');
+    expect(screen.getByRole('heading', { name: /Your code\.\s*Room to work\./, level: 1 })).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Checking connection…');
+    expect(screen.getByRole('button', { name: 'Checking…' })).toBeDisabled();
+    expect(screen.queryByText('Service available')).not.toBeInTheDocument();
   });
 
   it('displays API health status once fetched successfully', async () => {
     render(<App />);
 
-    // Wait for the loader to disappear and status dashboard to render
     await waitFor(() => {
-      expect(screen.queryByText('Querying API status...')).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('Service available');
     });
 
-    expect(screen.getByText('Monorepo System Status')).toBeInTheDocument();
-    expect(screen.getByText('healthy')).toBeInTheDocument();
-    expect(screen.getByText('connected (14ms)')).toBeInTheDocument();
-    expect(screen.getByText('development')).toBeInTheDocument();
+    expect(screen.getByLabelText('Service status')).toBeInTheDocument();
+    expect(screen.getByText('Service available')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeEnabled();
   });
 
   it('displays error UI when health check fails', async () => {
@@ -112,54 +111,55 @@ describe('Frontend App Component & Auth Flows', () => {
 
     render(<App />);
 
-    await waitFor(() => {
-      expect(screen.queryByText('Querying API status...')).not.toBeInTheDocument();
-    });
-
-    expect(screen.getByText('Network Error')).toBeInTheDocument();
-    expect(screen.getByText('Error connecting to the backend services:')).toBeInTheDocument();
+    expect(await screen.findByText('Connection unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('We couldn’t connect to SyncScript.');
+    expect(screen.getByRole('status')).toHaveTextContent('try again in a moment');
+    expect(screen.getByRole('button', { name: 'Check again' })).toBeEnabled();
+    expect(screen.queryByText('Service available')).not.toBeInTheDocument();
   });
 
   it('refetches health status when the refresh button is clicked', async () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.queryByText('Querying API status...')).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('Service available');
     });
 
     expect(mockedAxios.get).toHaveBeenCalled();
 
     // Click refresh button
-    const button = screen.getByRole('button', { name: /Refresh Health/i });
+    const button = screen.getByRole('button', { name: 'Check again' });
     fireEvent.click(button);
 
     expect(mockedAxios.get).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      expect(screen.getByRole('status')).toHaveTextContent('Service available');
+    });
   });
 
   it('navigates to Login page and handles registration toggle', async () => {
     render(<App />);
 
     await waitFor(() => {
-      expect(screen.queryByText('Querying API status...')).not.toBeInTheDocument();
+      expect(screen.getByRole('status')).toHaveTextContent('Service available');
     });
 
     // Click Sign In link in header
-    const signInLinks = screen.getAllByText('Sign In');
-    fireEvent.click(signInLinks[0]);
+    fireEvent.click(within(screen.getByRole('navigation', { name: 'Account' })).getByRole('link', { name: 'Sign In' }));
 
     // Verify Login page is rendered
-    expect(screen.getByText('Welcome Back')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Welcome back', level: 1 })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('you@example.com')).toBeInTheDocument();
 
     // Click Sign Up footer redirect
-    const signUpLink = screen.getByText('Sign Up');
+    const signUpLink = screen.getByRole('link', { name: 'Sign Up' });
     fireEvent.click(signUpLink);
 
     // Register is lazy-loaded (React.lazy + Suspense), so the chunk resolves
     // asynchronously — await the heading rather than asserting synchronously.
     // Generous timeout: under full-suite parallelism the dynamic import can be
     // slow, which is what made this test flaky before.
-    expect(await screen.findByText('Create Account', {}, { timeout: 15000 })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('John Doe')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Create an account', level: 1 }, { timeout: 15000 })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: 'Full Name' })).toBeInTheDocument();
   });
 });

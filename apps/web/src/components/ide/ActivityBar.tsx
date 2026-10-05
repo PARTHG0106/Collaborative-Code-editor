@@ -33,6 +33,8 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({ active, onSelect, side
             key={item.id}
             className={`ide-activity-btn ${active === item.id && sidebarVisible ? 'active' : ''}`}
             title={item.label}
+            aria-label={item.label}
+            aria-pressed={active === item.id && sidebarVisible}
             onClick={() => onSelect(item.id)}
           >
             {item.icon}

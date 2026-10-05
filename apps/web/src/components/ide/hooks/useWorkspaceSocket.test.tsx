@@ -240,4 +240,145 @@ describe('useWorkspaceSocket', () => {
     expect(result.current.presenceReady).toBe(false);
     expect(sockets[0].disconnect).toHaveBeenCalledOnce();
   });
+
+  it('waits for delivery acknowledgment before clearing a sent draft and prevents duplicate submissions', async () => {
+    const { result } = renderHook(() => useWorkspaceSocket('workspace-a'));
+    await act(async () => { result.current.handleChatInputChange('  A question  '); });
+    act(() => {
+      result.current.sendChatMessage('  A question  ');
+      result.current.sendChatMessage('  A question  ');
+    });
+    const sends = sockets[0].emit.mock.calls.filter(([event]) => event === 'chat_message');
+    expect(sends).toHaveLength(1);
+    expect(sends[0][1]).toEqual({ workspaceId: 'workspace-a', message: 'A question' });
+    expect(result.current.chatInput).toBe('  A question  ');
+    expect(result.current.isSendingChat).toBe(true);
+    act(() => { sends[0][2]({ success: true }); });
+    expect(result.current.chatInput).toBe('');
+    expect(result.current.isSendingChat).toBe(false);
+    expect(result.current.chatSendError).toBeNull();
+  });
+
+  it('preserves a draft after a delivery failure and allows an explicit retry', async () => {
+    const { result } = renderHook(() => useWorkspaceSocket('workspace-a'));
+    await act(async () => { result.current.handleChatInputChange('Keep this draft'); });
+    act(() => { result.current.sendChatMessage('Keep this draft'); });
+    const sent = sockets[0].emit.mock.calls.find(([event]) => event === 'chat_message')!;
+    act(() => { sent[2]({ success: false, error: 'Please try again.' }); });
+    expect(result.current.chatInput).toBe('Keep this draft');
+    expect(result.current.isSendingChat).toBe(false);
+    expect(result.current.chatSendError).toBe('Please try again.');
+    act(() => { result.current.sendChatMessage('Keep this draft'); });
+    const sends = sockets[0].emit.mock.calls.filter(([event]) => event === 'chat_message');
+    expect(sends).toHaveLength(2);
+    expect(result.current.chatSendError).toBeNull();
+    act(() => { sends[1][2]({ success: true }); });
+    expect(result.current.chatInput).toBe('');
+  });
+
+  it('preserves a newer draft typed while an earlier message is waiting for delivery', async () => {
+    const { result } = renderHook(() => useWorkspaceSocket('workspace-a'));
+    await act(async () => { result.current.handleChatInputChange('First message'); });
+    act(() => { result.current.sendChatMessage('First message'); });
+    const sent = sockets[0].emit.mock.calls.find(([event]) => event === 'chat_message')!;
+    act(() => { result.current.handleChatInputChange('Second message in progress'); });
+    act(() => { sent[2]({ success: true }); });
+    expect(result.current.chatInput).toBe('Second message in progress');
+    expect(result.current.isSendingChat).toBe(false);
+  });
+
+  it('times out uncertain delivery without erasing a draft or retrying automatically', async () => {
+    vi.useFakeTimers();
+    const { result, unmount } = renderHook(() => useWorkspaceSocket('workspace-a'));
+    await act(async () => { result.current.handleChatInputChange('Maybe delivered'); });
+    act(() => { result.current.sendChatMessage('Maybe delivered'); });
+    const sent = sockets[0].emit.mock.calls.find(([event]) => event === 'chat_message')!;
+    act(() => { vi.advanceTimersByTime(10000); });
+    expect(result.current.isSendingChat).toBe(false);
+    expect(result.current.chatInput).toBe('Maybe delivered');
+    expect(result.current.chatSendError).toMatch(/Check the chat before sending again/);
+    expect(sockets[0].emit.mock.calls.filter(([event]) => event === 'chat_message')).toHaveLength(1);
+    act(() => { sent[2]({ success: true }); });
+    expect(result.current.chatInput).toBe('Maybe delivered');
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('preserves an unconfirmed draft on disconnect and ignores a late acknowledgment', async () => {
+    const { result } = renderHook(() => useWorkspaceSocket('workspace-a'));
+    await act(async () => { result.current.handleChatInputChange('Network interrupted'); });
+    act(() => { result.current.sendChatMessage('Network interrupted'); });
+    const sent = sockets[0].emit.mock.calls.find(([event]) => event === 'chat_message')!;
+    act(() => { sockets[0].disconnect(); });
+    expect(result.current.isSendingChat).toBe(false);
+    expect(result.current.chatSendError).toMatch(/Delivery was not confirmed/);
+    act(() => { sent[2]({ success: true }); });
+    expect(result.current.chatInput).toBe('Network interrupted');
+  });
+
+  it('ignores an old delivery response after switching workspaces, including during a new send', async () => {
+    vi.useFakeTimers();
+    const { result, rerender, unmount } = renderHook(({ workspaceId }) => useWorkspaceSocket(workspaceId), { initialProps: { workspaceId: 'workspace-a' } });
+    await act(async () => { result.current.handleChatInputChange('First room'); });
+    act(() => { result.current.sendChatMessage('First room'); });
+    const oldSend = sockets[0].emit.mock.calls.find(([event]) => event === 'chat_message')!;
+    await act(async () => { rerender({ workspaceId: 'workspace-b' }); });
+    expect(result.current.isSendingChat).toBe(false);
+    expect(result.current.chatSendError).toBeNull();
+    act(() => { result.current.handleChatInputChange('Second room'); });
+    act(() => { result.current.sendChatMessage('Second room'); });
+    act(() => { oldSend[2]({ success: true }); });
+    expect(result.current.chatInput).toBe('Second room');
+    expect(result.current.isSendingChat).toBe(true);
+    const newSend = sockets[1].emit.mock.calls.find(([event]) => event === 'chat_message')!;
+    act(() => { newSend[2]({ success: true }); });
+    expect(result.current.chatInput).toBe('');
+    unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('resets a pending delivery when access is removed without an account change', async () => {
+    const { result, rerender } = renderHook(() => useWorkspaceSocket('workspace-a'));
+    await act(async () => { result.current.handleChatInputChange('Interrupted'); });
+    act(() => { result.current.sendChatMessage('Interrupted'); });
+    const sent = sockets[0].emit.mock.calls.find(([event]) => event === 'chat_message')!;
+    await act(async () => { auth.accessToken = null; rerender(); });
+    expect(result.current.isSendingChat).toBe(false);
+    await act(async () => { auth.accessToken = 'restored-token'; rerender(); });
+    act(() => { result.current.handleChatInputChange('After signing back in'); });
+    act(() => { sent[2]({ success: true }); });
+    expect(result.current.chatInput).toBe('After signing back in');
+    expect(result.current.isSendingChat).toBe(false);
+  });
+
+  it('exposes a chat history failure and retries while retaining live messages', async () => {
+    apiClient.get.mockRejectedValueOnce(new Error('Network unavailable'));
+    const { result } = renderHook(() => useWorkspaceSocket('workspace-a'));
+    await act(async () => {});
+    expect(result.current.chatHistoryLoading).toBe(false);
+    expect(result.current.chatHistoryError).toMatch(/Chat history could not load/);
+    act(() => { sockets[0].receive('chat_message', chat('new')); });
+    const loading = deferred();
+    apiClient.get.mockReturnValueOnce(loading.promise);
+    act(() => { result.current.retryChatHistory(); });
+    expect(result.current.chatHistoryLoading).toBe(true);
+    expect(result.current.chatHistoryError).toBeNull();
+    expect(result.current.chatMessages.map(message => message.id)).toEqual(['new']);
+    await act(async () => { loading.resolve(history([chat('old'), chat('new')])); });
+    expect(result.current.chatMessages.map(message => message.id)).toEqual(['old', 'new']);
+    expect(result.current.chatHistoryLoading).toBe(false);
+  });
+
+  it('does not let a stale history request overwrite the outcome of a newer retry', async () => {
+    const oldRequest = deferred();
+    const latestRequest = deferred();
+    apiClient.get.mockReturnValueOnce(oldRequest.promise).mockReturnValueOnce(latestRequest.promise);
+    const { result } = renderHook(() => useWorkspaceSocket('workspace-a'));
+    act(() => { result.current.retryChatHistory(); });
+    await act(async () => { latestRequest.resolve(history([chat('new')])); });
+    await act(async () => { oldRequest.resolve({ data: { success: false } }); });
+    expect(result.current.chatHistoryError).toBeNull();
+    expect(result.current.chatHistoryLoading).toBe(false);
+    expect(result.current.chatMessages.map(message => message.id)).toEqual(['new']);
+  });
 });

@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import rateLimit from 'express-rate-limit';
@@ -8,6 +8,11 @@ import prisma from '../lib/prisma.js';
 import { config } from '../config/index.js';
 import { requireAuth, AuthRequest, TokenPayload } from '../middleware/auth.js';
 import { sendEmail } from '../utils/mailer.js';
+import { originAllowlist } from '../lib/corsOrigins.js';
+import {
+  createGoogleChallenge, consumeGoogleChallenge, verifyGoogleCredential, resolveGoogleUser,
+  GoogleSignInError, GOOGLE_CHALLENGE_COOKIE, GOOGLE_CHALLENGE_TTL,
+} from '../lib/googleAuth.js';
 
 const router = Router();
 
@@ -54,6 +59,40 @@ const verifyLimiter = rateLimit({
   legacyHeaders: false,
   message: limiterResponse('Too many verification attempts. Please try again in 15 minutes.'),
 });
+
+const googleChallengeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 30,
+  standardHeaders: 'draft-7', legacyHeaders: false,
+  message: limiterResponse('Too many Google sign-in attempts. Please try again in 15 minutes.'),
+});
+
+const googleLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, limit: 10, skipSuccessfulRequests: true,
+  standardHeaders: 'draft-7', legacyHeaders: false,
+  message: limiterResponse('Too many Google sign-in attempts. Please try again in 15 minutes.'),
+});
+
+const googleCookieOptions = {
+  httpOnly: true, secure: config.isProduction,
+  sameSite: config.isProduction ? 'none' as const : 'lax' as const,
+  path: '/api/auth/google',
+};
+
+function requireGoogleOrigin(req: Request, res: Response, next: NextFunction) {
+  res.setHeader('Cache-Control', 'no-store');
+  // CORS only controls reading responses. Refuse disallowed writes too,
+  // including form submissions and requests with an absent/null Origin.
+  if (!req.headers.origin || !originAllowlist.isAllowed(req.headers.origin)) {
+    return res.status(403).json({ success: false, error: { message: 'Sign-in origin is not allowed.', statusCode: 403 } });
+  }
+  if (!req.is('application/json')) {
+    return res.status(415).json({ success: false, error: { message: 'Sign-in requires a JSON request.', statusCode: 415 } });
+  }
+  if (!config.googleClientId) {
+    return res.status(503).json({ success: false, error: { message: 'Google sign-in is not configured.', statusCode: 503 } });
+  }
+  next();
+}
 
 const MAX_VERIFY_ATTEMPTS = 5;
 const VERIFY_WINDOW_MS = 15 * 60 * 1000;
@@ -168,6 +207,47 @@ function setRefreshTokenCookie(res: Response, token: string) {
     maxAge,
   });
 }
+
+router.get('/google/config', (_req: Request, res: Response) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ success: true, data: { clientId: config.googleClientId } });
+});
+
+router.post('/google/challenge', requireGoogleOrigin, googleChallengeLimiter, async (req: Request, res: Response) => {
+  try {
+    const { cookie, nonce } = await createGoogleChallenge(req.cookies?.[GOOGLE_CHALLENGE_COOKIE]);
+    res.cookie(GOOGLE_CHALLENGE_COOKIE, cookie, { ...googleCookieOptions, maxAge: GOOGLE_CHALLENGE_TTL });
+    res.json({ success: true, data: { nonce } });
+  } catch {
+    res.status(500).json({ success: false, error: { message: 'Could not start Google sign-in. Please try again.', statusCode: 500 } });
+  }
+});
+
+router.post('/google', requireGoogleOrigin, googleLoginLimiter, async (req: Request, res: Response) => {
+  res.clearCookie(GOOGLE_CHALLENGE_COOKIE, googleCookieOptions);
+  try {
+    const nonceHash = await consumeGoogleChallenge(req.cookies?.[GOOGLE_CHALLENGE_COOKIE]);
+    if (!nonceHash) throw new GoogleSignInError('Google sign-in expired. Please try again.');
+    const input = z.object({ credential: z.string().min(1).max(16384) }).safeParse(req.body);
+    if (!input.success) throw new GoogleSignInError('A valid Google credential is required.', 400);
+    const identity = await verifyGoogleCredential(input.data.credential, nonceHash);
+    const user = await resolveGoogleUser(identity);
+    const accessToken = generateAccessToken(user);
+    const refreshToken = generateRefreshToken(user.id);
+    const decoded = jwt.decode(refreshToken) as { exp: number };
+    await prisma.refreshToken.create({ data: {
+      tokenHash: hashRefreshToken(refreshToken), userId: user.id, expiresAt: new Date(decoded.exp * 1000),
+    } });
+    setRefreshTokenCookie(res, refreshToken);
+    res.json({ success: true, data: {
+      accessToken, user: { id: user.id, email: user.email, name: user.name },
+    } });
+  } catch (error) {
+    const statusCode = error instanceof GoogleSignInError ? error.statusCode : 500;
+    const message = error instanceof GoogleSignInError ? error.message : 'Google sign-in could not complete. Please try again.';
+    res.status(statusCode).json({ success: false, error: { message, statusCode } });
+  }
+});
 
 /**
  * POST /api/auth/register
@@ -304,7 +384,7 @@ router.post('/login', loginLimiter, async (req: Request, res: Response) => {
       where: { email },
     });
 
-    if (!user) {
+    if (!user || !user.passwordHash) {
       return res.status(401).json({
         success: false,
         error: {
