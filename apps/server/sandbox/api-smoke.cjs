@@ -4,6 +4,7 @@
 // describe synthetic test data and are never printed by this harness.
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+const { readdir } = require('node:fs/promises');
 const { createRequire } = require('node:module');
 const load = createRequire('/app/package.json');
 const { Client } = load('pg');
@@ -109,7 +110,9 @@ const db = new Client({ connectionString: databaseUrl });
   assert.equal(health.data.features.isolatedWorkspaceTerminal, true);
   await db.connect();
   const history = (await db.query('SELECT migration_name, finished_at FROM _prisma_migrations ORDER BY migration_name')).rows;
-  assert.equal(history.length, 10, 'Fresh startup must apply the complete committed history');
+  const committedMigrations = (await readdir('/app/apps/server/prisma/migrations', { withFileTypes: true }))
+    .filter(entry => entry.isDirectory()).map(entry => entry.name).sort();
+  assert.deepEqual(history.map(row => row.migration_name), committedMigrations, 'Fresh startup must apply the complete committed history');
   assert(history.every(row => row.finished_at));
   assert(history.some(row => row.migration_name.endsWith('_add_execution_models')));
   assert(history.some(row => row.migration_name.endsWith('_optional_d1_content')));
