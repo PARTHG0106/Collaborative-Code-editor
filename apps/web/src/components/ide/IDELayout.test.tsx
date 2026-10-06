@@ -339,10 +339,18 @@ describe('IDE collaborative editing', () => {
 
   it('remembers positions between tabs, debounces cursor writes, and flushes metadata on pagehide and unmount', async () => {
     saveSession({ positions: { alpha: { lineNumber: 1, column: 3 }, beta: { lineNumber: 2, column: 2 } } });
-    const view = render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
-    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />); });
+    expect(socket.emit).toHaveBeenCalledWith('join_file', { fileId: 'alpha' });
+    // Cursor restoration runs after Monaco receives the synchronized model.
+    // Wait for that frame explicitly instead of racing waitFor's 1s deadline
+    // when CI is also compiling and testing the server.
+    const nextEditorFrame = async () => {
+      await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
+    };
     act(() => { socket.receive('file_init', { fileId: 'alpha', content: 'live alpha', version: 0 }); });
-    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 1, column: 3 }));
+    await nextEditorFrame();
+    expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 1, column: 3 });
     act(() => { window.dispatchEvent(new Event('pagehide')); });
     const writes = vi.spyOn(Storage.prototype, 'setItem');
     act(() => {
@@ -354,10 +362,12 @@ describe('IDE collaborative editing', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Find a file by name or path' }), { target: { value: 'beta' } });
     fireEvent.keyDown(screen.getByRole('combobox', { name: 'Find a file by name or path' }), { key: 'Enter' });
     act(() => { socket.receive('file_init', { fileId: 'beta', content: 'first\nsecond', version: 0 }); });
-    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 2 }));
+    await nextEditorFrame();
+    expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 2 });
     expect(mocks.editorFocus).toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'alpha.ts' }));
-    await waitFor(() => expect(mocks.setPosition).toHaveBeenLastCalledWith({ lineNumber: 1, column: 7 }));
+    await nextEditorFrame();
+    expect(mocks.setPosition).toHaveBeenLastCalledWith({ lineNumber: 1, column: 7 });
     act(() => { mocks.onCursor?.({ position: { lineNumber: 1, column: 8 } }); window.dispatchEvent(new Event('pagehide')); });
     expect(readEditorSession('self', 'workspace')?.positions.alpha).toEqual({ lineNumber: 1, column: 8 });
     act(() => { mocks.onCursor?.({ position: { lineNumber: 1, column: 9 } }); });
