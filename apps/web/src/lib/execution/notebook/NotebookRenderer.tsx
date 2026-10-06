@@ -1,22 +1,27 @@
-import React, { useState } from 'react';
-import { Play, Plus, Trash2, ChevronUp, ChevronDown } from 'lucide-react';
+import React, { useId, useState } from 'react';
+import { Play, Plus, Trash2, ChevronUp, ChevronDown, Square } from 'lucide-react';
 import Editor from '@monaco-editor/react';
 import DOMPurify from 'dompurify';
 
 export interface CellOutput {
   type: 'stdout' | 'stderr' | 'display_data' | 'execute_result' | 'error';
   text?: string;
-  data?: Record<string, string>; // mime-type -> content
+  data?: Record<string, unknown>; // MIME bundles may contain text arrays or JSON values.
   traceback?: string[];
+  executionCount?: number | null;
+  ename?: string;
+  evalue?: string;
+  original?: Record<string, unknown>;
 }
 
 export interface NotebookCell {
   id: string;
-  type: 'code' | 'markdown';
+  type: 'code' | 'markdown' | 'raw';
   source: string;
   outputs: CellOutput[];
   executionCount: number | null;
   isRunning: boolean;
+  original?: Record<string, unknown>;
 }
 
 interface NotebookRendererProps {
@@ -29,13 +34,42 @@ interface NotebookRendererProps {
   onMoveCell: (id: string, direction: 'up' | 'down') => void;
   theme: 'dark' | 'light';
   readOnly?: boolean;
+  isExecuting?: boolean;
+  onStop?: () => void;
+  inputText?: string;
+  onInputTextChange?: (value: string) => void;
+}
+
+function mimeText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value) && value.every(part => typeof part === 'string')) return value.join('');
+  return undefined;
+}
+
+function renderOutput(output: CellOutput) {
+  if (output.type === 'display_data' || output.type === 'execute_result') {
+    const png = mimeText(output.data?.['image/png']);
+    const html = mimeText(output.data?.['text/html']);
+    if (png) return <img src={`data:image/png;base64,${png}`} alt="output" style={{ maxWidth: '100%', background: '#fff' }} />;
+    if (html) return <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html, { USE_PROFILES: { html: true } }) }}
+      style={{ background: '#fff', color: '#000', padding: '8px' }} />;
+  }
+  const content = output.type === 'error'
+    ? output.traceback?.join('\n') || [output.ename, output.evalue].filter(Boolean).join(': ')
+    : mimeText(output.data?.['text/plain']) ?? output.text;
+  return <pre style={{ margin: 0, whiteSpace: 'pre-wrap',
+    color: output.type === 'stderr' || output.type === 'error' ? 'var(--ide-danger)' : 'var(--ide-text)',
+  }}>{content}</pre>;
 }
 
 export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
   cells, onCellChange, onRunCell, onRunAll,
-  onAddCell, onDeleteCell, onMoveCell, theme, readOnly = false,
+  onAddCell, onDeleteCell, onMoveCell, theme, readOnly = false, isExecuting = false, onStop,
+  inputText = '', onInputTextChange,
 }) => {
   const [focusedCell, setFocusedCell] = useState<string | null>(null);
+  const inputHelpId = useId();
+  const busy = isExecuting || cells.some(cell => cell.isRunning);
 
   return (
     <div style={{
@@ -43,15 +77,21 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
       fontFamily: 'var(--ide-font)', width: '100%', height: '100%', overflowY: 'auto'
     }}>
       {/* Toolbar */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px',
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: '8px', marginBottom: '16px',
         padding: '8px 12px', borderRadius: '6px',
         background: 'var(--ide-surface)', border: '1px solid var(--ide-border)',
         position: 'sticky', top: 0, zIndex: 10
       }}>
-        <button disabled={readOnly} className="ide-btn" onClick={onRunAll}
+        <button disabled={readOnly || busy} className="ide-btn" onClick={onRunAll}
           style={{ display: 'flex', alignItems: 'center', gap: '4px', height: '28px', padding: '0 12px' }}>
           <Play size={12} /> Run All
         </button>
+        {busy && <>
+          {onStop && <button className="ide-btn" onClick={onStop}>
+            <Square size={12} /> Stop
+          </button>}
+          <span role="status" style={{ alignSelf: 'center' }}>Running cell…</span>
+        </>}
         <button disabled={readOnly} className="ide-btn"
           style={{ display: 'flex', alignItems: 'center', gap: '4px', height: '28px', padding: '0 12px', background: 'transparent', border: '1px solid var(--ide-border)' }}
           onClick={() => onAddCell(cells[cells.length - 1]?.id || '', 'code')}>
@@ -62,6 +102,26 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
           onClick={() => onAddCell(cells[cells.length - 1]?.id || '', 'markdown')}>
           <Plus size={12} /> Markdown
         </button>
+        <details style={{ marginLeft: 'auto', minWidth: 0, maxWidth: '100%' }}>
+          <summary style={{ cursor: 'pointer', padding: '5px 0', fontSize: '12px' }}>Python input</summary>
+          <div style={{ width: '260px', maxWidth: '100%', paddingTop: '4px' }}>
+            <textarea
+              aria-label="Python input lines"
+              aria-describedby={inputHelpId}
+              value={inputText}
+              onChange={event => { if (!readOnly) onInputTextChange?.(event.target.value); }}
+              readOnly={readOnly || !onInputTextChange}
+              rows={3}
+              spellCheck={false}
+              style={{ width: '100%', boxSizing: 'border-box', resize: 'vertical', padding: '6px 8px',
+                border: '1px solid var(--ide-border)', borderRadius: '4px',
+                background: 'var(--ide-editor-bg)', color: 'var(--ide-text)', fontFamily: 'var(--ide-font-mono)', fontSize: '12px' }}
+            />
+            <p id={inputHelpId} style={{ margin: '4px 0 0', color: 'var(--ide-text-muted)', fontSize: '11px', lineHeight: 1.4 }}>
+              One line for each input() call. Used from the beginning on each run.
+            </p>
+          </div>
+        </details>
       </div>
 
       {/* Cells */}
@@ -71,7 +131,7 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
         </div>
       )}
 
-      {cells.map((cell, idx) => (
+      {cells.map(cell => (
         <div key={cell.id}
           onClick={() => setFocusedCell(cell.id)}
           style={{
@@ -91,12 +151,12 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
             <span style={{ width: '60px', fontFamily: 'var(--ide-font-mono)' }}>
               {cell.type === 'code'
                 ? `[${cell.executionCount ?? ' '}]`
-                : 'md'}
+                : cell.type === 'raw' ? 'raw' : 'md'}
             </span>
             <div style={{ flex: 1 }} />
             {cell.type === 'code' && (
               <button className="ide-icon-btn" onClick={(e) => { e.stopPropagation(); onRunCell(cell.id); }}
-                disabled={readOnly || cell.isRunning}
+                disabled={readOnly || busy}
                 title="Run cell"
                 style={{ marginRight: '4px', color: cell.isRunning ? 'var(--ide-accent)' : undefined }}>
                 {cell.isRunning ? <span style={{ animation: 'pulse 1s infinite' }}>⏳</span> : <Play size={12} />}
@@ -118,10 +178,12 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
           <div style={{ minHeight: '60px', padding: '8px 0' }}>
             <Editor
               height={`${Math.max(60, (cell.source.split('\n').length || 1) * 20)}px`}
-              language={cell.type === 'code' ? 'python' : 'markdown'}
+              language={cell.type === 'code' ? 'python' : cell.type === 'raw' ? 'plaintext' : 'markdown'}
               theme={theme === 'dark' ? 'vs-dark' : 'vs'}
               value={cell.source}
-              onChange={(val) => { if (!readOnly) onCellChange(cell.id, val || ''); }}
+              onChange={(val, event) => {
+                if (!readOnly && !event?.isFlush && !event?.isEolChange) onCellChange(cell.id, val || '');
+              }}
               options={{
                 readOnly,
                 minimap: { enabled: false }, lineNumbers: 'off',
@@ -145,27 +207,7 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
             }}>
               {cell.outputs.map((output, oi) => (
                 <div key={oi} style={{ marginBottom: oi < cell.outputs.length - 1 ? '8px' : 0 }}>
-                  {output.type === 'stdout' && (
-                    <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: 'var(--ide-text)' }}>{output.text}</pre>
-                  )}
-                  {output.type === 'stderr' && (
-                    <pre style={{ margin: 0, color: 'var(--ide-danger)', whiteSpace: 'pre-wrap' }}>
-                      {output.text}
-                    </pre>
-                  )}
-                  {output.type === 'error' && (
-                    <pre style={{ margin: 0, color: 'var(--ide-danger)', whiteSpace: 'pre-wrap' }}>
-                      {output.traceback?.join('\n')}
-                    </pre>
-                  )}
-                  {output.type === 'display_data' && output.data?.['image/png'] && (
-                    <img src={`data:image/png;base64,${output.data['image/png']}`}
-                      alt="output" style={{ maxWidth: '100%', background: '#fff' }} />
-                  )}
-                  {output.type === 'display_data' && output.data?.['text/html'] && (
-                    <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(output.data['text/html'], { USE_PROFILES: { html: true } }) }}
-                      style={{ background: '#fff', color: '#000', padding: '8px' }} />
-                  )}
+                  {renderOutput(output)}
                 </div>
               ))}
             </div>

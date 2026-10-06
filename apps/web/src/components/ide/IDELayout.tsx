@@ -25,8 +25,8 @@ import { TerminalManager } from '../../lib/execution/terminal/TerminalManager';
 import { TerminalSession, TerminalStatus } from '../../lib/execution/terminal/TerminalSession';
 import { AgentConnector } from '../../lib/execution/AgentConnector';
 import { ExecutionTarget } from '../../lib/execution/types';
-import { NotebookRenderer, NotebookCell, CellOutput } from '../../lib/execution/notebook/NotebookRenderer';
-import { parseNotebook, serializeNotebook, NotebookKernel } from '../../lib/execution/notebook/NotebookExecutor';
+import { NotebookRenderer } from '../../lib/execution/notebook/NotebookRenderer';
+import { useNotebook } from './hooks/useNotebook';
 import Editor from '@monaco-editor/react';
 import { useCollaborativeFiles } from './hooks/useCollaborativeFiles';
 import { normalizeEditorContent, editorOffsetToDocumentOffset, documentOffsetToEditorOffset, mapEditorChanges } from '../../lib/EditorText';
@@ -121,10 +121,6 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const terminalSessionRef = useRef<TerminalSession | null>(null);
   const agentRef = useRef(new AgentConnector());
   
-  // Notebook state
-  const [notebookCells, setNotebookCells] = useState<NotebookCell[]>([]);
-  const notebookKernelRef = useRef<NotebookKernel | null>(null);
-
   // Auto-detect local agent on mount
   useEffect(() => {
     const agent = agentRef.current;
@@ -204,6 +200,13 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const downloads = useWorkspaceDownloads(workspaceId, workspace?.name || 'workspace', collaboration.getDownloadContents);
   const editorContent = collaboration.content;
   editorSourceRef.current = editorContent;
+  const notebook = useNotebook({
+    fileId: fs.activeFileId,
+    content: editorContent,
+    enabled: getLanguage(activeFile?.name ?? '') === 'jupyter' && preview?.fileId !== fs.activeFileId,
+    writable: canModify && collaboration.ready,
+    onChange: collaboration.replaceContent,
+  });
   const cursorSocketRef = useRef(ws.socket);
   cursorSocketRef.current = ws.socket;
   const editorRef = useRef<any>(null);
@@ -330,11 +333,6 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   useEffect(() => {
     if (sessionReady) saveNavigation(JSON.parse(openFileIdsKey), fs.activeFileId, JSON.parse(expandedFolderIdsKey));
   }, [sessionReady, openFileIdsKey, fs.activeFileId, expandedFolderIdsKey, saveNavigation]);
-
-  // Each opened document drains its edit queue independently of the active tab.
-  useEffect(() => {
-    if (activeFile?.name.endsWith('.ipynb')) setNotebookCells(parseNotebook(editorContent));
-  }, [fs.activeFileId, activeFile?.name, editorContent]);
 
   useEffect(() => {
     setPreview(null);
@@ -632,91 +630,6 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     terminalManagerRef.current?.writeStderr('\r\n[Execution cancelled]\r\n');
   };
 
-  // --- Notebook Handlers ---
-  const syncNotebookToEditor = (cells: NotebookCell[]) => {
-    if (!canModify || !collaboration.ready || !fs.activeFileId) return;
-    setNotebookCells(cells);
-    collaboration.replaceContent(fs.activeFileId, serializeNotebook(cells));
-  };
-
-  const handleCellChange = (id: string, source: string) => {
-    if (notebookCells.find(cell => cell.id === id)?.source === source) return;
-    const newCells = notebookCells.map(c => c.id === id ? { ...c, source } : c);
-    syncNotebookToEditor(newCells);
-  };
-
-  const handleAddCell = (afterId: string, type: 'code' | 'markdown') => {
-    const idx = notebookCells.findIndex(c => c.id === afterId);
-    const newCell: NotebookCell = { id: crypto.randomUUID(), type, source: '', outputs: [], executionCount: null, isRunning: false };
-    const newCells = [...notebookCells];
-    newCells.splice(idx >= 0 ? idx + 1 : newCells.length, 0, newCell);
-    syncNotebookToEditor(newCells);
-  };
-
-  const handleDeleteCell = (id: string) => {
-    const newCells = notebookCells.filter(c => c.id !== id);
-    syncNotebookToEditor(newCells);
-  };
-
-  const handleMoveCell = (id: string, direction: 'up' | 'down') => {
-    const idx = notebookCells.findIndex(c => c.id === id);
-    if (idx < 0) return;
-    if (direction === 'up' && idx === 0) return;
-    if (direction === 'down' && idx === notebookCells.length - 1) return;
-    
-    const newCells = [...notebookCells];
-    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
-    [newCells[idx], newCells[targetIdx]] = [newCells[targetIdx], newCells[idx]];
-    syncNotebookToEditor(newCells);
-  };
-
-  const handleRunCell = async (id: string) => {
-    if (!canModify || !collaboration.ready || !fs.activeFileId) return;
-    const fileId = fs.activeFileId;
-    if (!notebookKernelRef.current) notebookKernelRef.current = new NotebookKernel();
-    
-    setNotebookCells(cells => cells.map(c => c.id === id ? { ...c, isRunning: true, outputs: [] } : c));
-    
-    const cell = notebookCells.find(c => c.id === id);
-    if (!cell || cell.type !== 'code') return;
-
-    let finalOutputs: CellOutput[] = [];
-    await notebookKernelRef.current.runCell(
-      cell,
-      (outputs) => {
-        finalOutputs = outputs;
-        if (activeFileIdRef.current !== fileId) return;
-        setNotebookCells(cells => cells.map(c => c.id === id ? { ...c, outputs } : c));
-      },
-      () => {
-        // Request input - show in terminal panel as a fallback or native prompt
-        const answer = window.prompt("Python input:");
-        notebookKernelRef.current?.sendInput(answer || '');
-      }
-    );
-
-    if (activeFileIdRef.current !== fileId) return;
-    setNotebookCells(cells => {
-      const newCells = cells.map(c => c.id === id ? { 
-        ...c, 
-        outputs: finalOutputs,
-        isRunning: false,
-        executionCount: notebookKernelRef.current?.getExecutionCount() || null
-      } : c);
-      // Sync final outputs to file immediately after state calculation
-      setTimeout(() => { if (activeFileIdRef.current === fileId) syncNotebookToEditor(newCells); }, 0);
-      return newCells;
-    });
-  };
-
-  const handleRunAllCells = async () => {
-    const fileId = fs.activeFileId;
-    for (const cell of notebookCells) {
-      if (activeFileIdRef.current !== fileId) return;
-      if (cell.type === 'code') await handleRunCell(cell.id);
-    }
-  };
-
   // Loading state
   if (loading) return <div className={`ide-root ${theme === 'dark' ? 'ide-dark' : ''}`} style={{ alignItems: 'center', justifyContent: 'center' }}><Loader2 size={24} className="animate-spin" style={{ color: 'var(--ide-accent)' }} /></div>;
   if (!workspace) return <div className={`ide-root ${theme === 'dark' ? 'ide-dark' : ''}`} style={{ alignItems: 'center', justifyContent: 'center', gap: 8 }}><span>Failed to load workspace</span><button className="ide-btn" onClick={onBack}>Back</button></div>;
@@ -877,15 +790,23 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
                   <Editor key={'preview-' + preview.fileId} height="100%" language={editorLang} theme={theme === 'dark' ? 'vs-dark' : 'vs'} value={preview.content} options={{ readOnly: true }} />
                 </>
               ) : editorLang === 'jupyter' ? (
+                notebook.error ? <div role="alert" style={{ padding: 24 }}>
+                  {notebook.error} Download the original file from Explorer to inspect its JSON.
+                </div> :
                 <NotebookRenderer
+                  key={fs.activeFileId}
                   readOnly={!canModify || !collaboration.ready}
-                  cells={notebookCells}
-                  onCellChange={handleCellChange}
-                  onRunCell={handleRunCell}
-                  onRunAll={handleRunAllCells}
-                  onAddCell={handleAddCell}
-                  onDeleteCell={handleDeleteCell}
-                  onMoveCell={handleMoveCell}
+                  cells={notebook.cells}
+                  isExecuting={notebook.isExecuting}
+                  onStop={notebook.stop}
+                  inputText={notebook.inputText}
+                  onInputTextChange={notebook.changeInput}
+                  onCellChange={notebook.changeCell}
+                  onRunCell={notebook.runCell}
+                  onRunAll={notebook.runAll}
+                  onAddCell={notebook.addCell}
+                  onDeleteCell={notebook.deleteCell}
+                  onMoveCell={notebook.moveCell}
                   theme={theme}
                 />
               ) : (

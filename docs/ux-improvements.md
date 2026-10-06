@@ -65,6 +65,26 @@ keyboard access, and the existing editor behavior remain available.
   created only in the terminal, including installed dependencies, must first be
   added to the Explorer to appear in these exports.
 
+## Jupyter notebooks
+
+- Open `.ipynb` files as editable cells. Run a cell or use **Run All**; Python
+  variables remain available to later cells in that notebook during the current
+  workspace visit. Different notebooks use separate variable namespaces.
+- Expression results, printed text, errors, and imported rich outputs are shown
+  below their cells. Saves preserve notebook metadata, cell metadata, attachments,
+  and raw cells. Invalid notebook JSON displays an error without replacing it.
+- Browser Python loads supported imports automatically. `%pip install` and
+  `!pip install` support Pyodide packages and compatible pure-Python wheels;
+  arbitrary shell commands and native platform wheels are not supported.
+- Expand **Python input** to supply one line per `input()` call. Lines start at
+  the beginning for each cell run or Run All sequence and are kept only in memory.
+  Without supplied lines, a native prompt is used where the browser supports it.
+- Runs are serialized. Stop cancels queued work and Python tasks waiting on
+  async operations; it resets that notebook's variables. A tight synchronous
+  Python loop still runs on the browser's main thread and cannot be interrupted
+  by the Stop button. Switching files cancels an active run; completed notebook
+  kernels survive tab switches until the workspace is closed or reloaded.
+
 ## Sign-in and accessibility
 
 - Login, registration, and verification preserve the requested workspace route.
