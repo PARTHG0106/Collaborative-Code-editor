@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
+import { ThemeToggle } from '../components/ThemeToggle';
 import './Dashboard.css';
 import { 
   LogOut, FolderGit2, Code2,
@@ -183,7 +184,7 @@ export const Dashboard: React.FC = () => {
       <header className="site-header" aria-hidden={isCreateModalOpen || undefined}>
         <div className="site-container workspace-header-inner">
           <div className="workspace-header-location">
-            <div className="site-brand"><Code2 size={21} aria-hidden="true" /><span>syncscript</span></div>
+            <Link to="/" className="site-brand" aria-label="SyncScript home"><Code2 size={21} aria-hidden="true" /><span>syncscript</span></Link>
             <span className="workspace-breadcrumb-divider" aria-hidden="true">/</span>
             <span className="workspace-breadcrumb">Workspaces</span>
           </div>
@@ -192,6 +193,7 @@ export const Dashboard: React.FC = () => {
               <span className="workspace-account-name">{user.name}</span>
               <span className="workspace-account-email">{user.email}</span>
             </div>
+            <ThemeToggle />
             <button className="site-button workspace-signout" onClick={handleLogout} disabled={isLoggingOut} aria-label={isLoggingOut ? 'Logging out' : 'Sign Out'}>
               <LogOut size={15} aria-hidden="true" />
               <span>{isLoggingOut ? 'Logging out...' : 'Sign Out'}</span>

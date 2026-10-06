@@ -42,8 +42,14 @@ export const ActivityBar: React.FC<ActivityBarProps> = ({ active, onSelect, side
         ))}
       </div>
       <div className="ide-activity-bar-bottom">
-        <button className="ide-activity-btn" title="Toggle Theme" onClick={toggleTheme}>
-          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+        <button
+          type="button"
+          className="ide-activity-btn"
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          onClick={toggleTheme}
+        >
+          {theme === 'dark' ? <Sun size={18} aria-hidden="true" /> : <Moon size={18} aria-hidden="true" />}
         </button>
       </div>
     </div>

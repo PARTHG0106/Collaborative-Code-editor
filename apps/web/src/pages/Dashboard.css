@@ -451,8 +451,8 @@
 @media (max-width: 640px) {
   .workspace-page .workspace-header-inner {
     display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 10px 16px;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 10px 8px;
   }
 
   .workspace-page .workspace-header-location {
@@ -477,9 +477,15 @@
     text-align: left;
   }
 
-  .workspace-page .workspace-signout {
+  .workspace-page .site-theme-toggle {
     grid-column: 2;
     grid-row: 1;
+  }
+
+  .workspace-page .workspace-signout {
+    grid-column: 3;
+    grid-row: 1;
+    min-height: 40px;
   }
 
   .workspace-page .workspace-main {

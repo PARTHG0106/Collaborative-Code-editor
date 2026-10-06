@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import Login from './Login';
 import Register from './Register';
 import VerifyEmail from './VerifyEmail';
+import { ThemeProvider } from '../context/ThemeContext';
 
 const auth = vi.hoisted(() => ({
   user: null as { id: string } | null,
@@ -27,14 +28,16 @@ function Destination() {
 
 function renderAuth(pathname = '/login') {
   return render(
-    <MemoryRouter initialEntries={[{ pathname, state: { from: destination } }]}>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        <Route path="/verify-email" element={<VerifyEmail />} />
-        <Route path="*" element={<Destination />} />
-      </Routes>
-    </MemoryRouter>,
+    <ThemeProvider>
+      <MemoryRouter initialEntries={[{ pathname, state: { from: destination } }]}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<Register />} />
+          <Route path="/verify-email" element={<VerifyEmail />} />
+          <Route path="*" element={<Destination />} />
+        </Routes>
+      </MemoryRouter>
+    </ThemeProvider>,
   );
 }
 

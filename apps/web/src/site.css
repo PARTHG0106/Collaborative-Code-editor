@@ -44,6 +44,8 @@
 .site-brand { display: inline-flex; align-items: center; gap: 9px; font-size: 16px; font-weight: 600; letter-spacing: -.55px; color: var(--site-text); white-space: nowrap; }
 .site-brand svg { color: var(--site-accent); flex-shrink: 0; }
 .site-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px; padding: 7px 12px; border: 1px solid var(--site-border); border-radius: 5px; background: var(--site-surface); color: var(--site-text); font-size: 13px; font-weight: 500; line-height: 1.5; white-space: nowrap; transition: background-color .12s, border-color .12s; }
+.site-theme-toggle { flex-shrink: 0; min-width: 40px; min-height: 40px; }
+.site-theme-toggle svg { flex-shrink: 0; }
 .site-shell .site-button:hover:not(:disabled) { background: var(--site-subtle); border-color: var(--site-muted); }
 .site-shell .site-button-primary { background: var(--site-text); border-color: var(--site-text); color: var(--site-primary-text); }
 .site-shell .site-button-primary:hover:not(:disabled) { background: var(--site-text); border-color: var(--site-text); opacity: .88; }
@@ -130,9 +132,11 @@
 @media (max-width: 540px) {
   .site-container { padding-inline: 20px; }
   .site-brand { font-size: 15px; }
-  .landing-header-inner { min-height: 60px; gap: 16px; }
-  .landing-nav { gap: 14px; font-size: 12px; }
+  .landing-header-inner { min-height: 60px; gap: 10px 12px; flex-wrap: wrap; padding-block: 10px; }
+  .landing-nav { gap: 12px; font-size: 12px; margin-left: auto; }
   .landing-nav .site-button { padding-inline: 10px; min-height: 34px; font-size: 12px; }
+  .site-theme-toggle-label { display: none; }
+  .site-shell .site-theme-toggle { width: 40px; height: 40px; padding: 0; }
   .landing-product-link { display: none; }
   .landing-intro { padding-top: 48px; }
   .landing-intro h1 { font-size: 42px; }

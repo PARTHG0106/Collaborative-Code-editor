@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Code2 } from 'lucide-react';
+import { ThemeToggle } from '../components/ThemeToggle';
 import { getAuthDestination } from './authNavigation';
 import './AuthPages.css';
 
@@ -103,10 +104,13 @@ export const VerifyEmail: React.FC = () => {
   return (
     <main className="auth-page">
       <div className="auth-page-content">
-        <Link to="/" aria-label="SyncScript home" className="site-brand auth-page-brand">
-          <Code2 size={20} aria-hidden="true" />
-          <span>syncscript</span>
-        </Link>
+        <div className="auth-page-topline">
+          <Link to="/" aria-label="SyncScript home" className="site-brand auth-page-brand">
+            <Code2 size={20} aria-hidden="true" />
+            <span>syncscript</span>
+          </Link>
+          <ThemeToggle />
+        </div>
         <header className="auth-page-heading">
           <h1>Verify Email</h1>
           <p>

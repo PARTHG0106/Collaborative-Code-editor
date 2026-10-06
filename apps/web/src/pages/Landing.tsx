@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, Code2, FileCode2, Folder, GitBranch, Terminal } from 'lucide-react';
 import { useAuth, apiClient } from '../context/AuthContext';
+import { ThemeToggle } from '../components/ThemeToggle';
 
 export const Landing: React.FC = () => {
   const { user } = useAuth();
@@ -46,6 +47,7 @@ export const Landing: React.FC = () => {
           <Link to="/" className="site-brand" aria-label="SyncScript home"><Code2 size={21} strokeWidth={1.7} aria-hidden="true" /><span>syncscript</span></Link>
           <nav className="landing-nav" aria-label="Account">
             <a href="#workflow" className="landing-product-link">How it works</a>
+            <ThemeToggle />
             {user ? <Link className="site-button site-button-primary" to="/dashboard">Dashboard <ArrowRight size={14} aria-hidden="true" /></Link> : <>
               <Link to="/login">Sign In</Link>
               <Link className="site-button site-button-primary" to="/register">Sign Up <ArrowRight size={14} aria-hidden="true" /></Link>

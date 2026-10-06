@@ -4,6 +4,7 @@ import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { Dashboard } from './Dashboard';
 import { useAuth } from '../context/AuthContext';
+import { ThemeProvider } from '../context/ThemeContext';
 
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async (importOriginal) => ({
@@ -11,7 +12,7 @@ vi.mock('react-router-dom', async (importOriginal) => ({
   useNavigate: () => mockNavigate,
 }));
 
-const render = (ui: React.ReactElement) => renderUI(<MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{ui}</MemoryRouter>);
+const render = (ui: React.ReactElement) => renderUI(<ThemeProvider><MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{ui}</MemoryRouter></ThemeProvider>);
 
 const workspaceFixtures = [
   { id: 'alpha', name: 'Alpha API', description: 'Backend service', role: 'OWNER', memberCount: 1, joinedAt: '2026-10-01T00:00:00Z', createdAt: '2026-09-01T00:00:00Z' },
@@ -193,20 +194,20 @@ describe('Dashboard Workspace Flow', () => {
     expect(screen.getByText('No matching workspaces')).toBeInTheDocument();
     expect(screen.queryByText('No Workspaces Yet')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
-    expect(screen.getAllByRole('link')).toHaveLength(3);
+    expect(within(screen.getByRole('main')).getAllByRole('link')).toHaveLength(3);
     expect(screen.getByRole('searchbox')).toHaveValue('');
     expect(screen.getByLabelText('Your role')).toHaveValue('ALL');
 
     fireEvent.change(screen.getByLabelText('Your role'), { target: { value: 'VIEWER' } });
     expect(screen.getByRole('link', { name: 'Beta docs' })).toHaveAccessibleDescription('Read-only access');
-    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect(within(screen.getByRole('main')).getAllByRole('link')).toHaveLength(1);
   });
 
   it('sorts workspace links by joined date, name, or creation date', async () => {
     vi.mocked(apiClient.get).mockResolvedValue({ data: { success: true, data: workspaceFixtures } });
     render(<Dashboard />);
     await screen.findByRole('link', { name: 'Alpha API' });
-    const names = () => screen.getAllByRole('link').map((link) => within(link).getByRole('heading').textContent);
+    const names = () => within(screen.getByRole('main')).getAllByRole('link').map((link) => within(link).getByRole('heading').textContent);
     expect(names()).toEqual(['Zebra UI', 'Beta docs', 'Alpha API']);
 
     fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'name' } });
@@ -237,7 +238,7 @@ describe('Dashboard Workspace Flow', () => {
     await screen.findByRole('link', { name: 'Alpha API' });
     fireEvent.click(screen.getByRole('button', { name: 'Refresh workspaces' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Failed to fetch workspaces');
-    expect(screen.getAllByRole('link')).toHaveLength(3);
+    expect(within(screen.getByRole('main')).getAllByRole('link')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Try again' })).toBeEnabled();
   });
 

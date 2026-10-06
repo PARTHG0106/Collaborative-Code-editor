@@ -1,6 +1,7 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route, useParams, useNavigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
+import { ThemeProvider } from './context/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
@@ -38,49 +39,51 @@ const WorkspacePage: React.FC = () => {
 
 function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Routes>
-          {/* IDE Route - full screen, no floating paths */}
-          <Route
-            path="/workspace/:workspaceId"
-            element={
-              <ProtectedRoute>
-                <Suspense fallback={<RouteFallback />}>
-                  <WorkspacePage />
-                </Suspense>
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Public pages and workspace management share a restrained site theme. */}
-          <Route
-            path="*"
-            element={
-              <div className="site-shell">
+    <ThemeProvider>
+      <BrowserRouter>
+        <AuthProvider>
+          <Routes>
+            {/* IDE Route - full screen, no floating paths */}
+            <Route
+              path="/workspace/:workspaceId"
+              element={
+                <ProtectedRoute>
                   <Suspense fallback={<RouteFallback />}>
-                    <Routes>
-                      <Route path="/" element={<Landing />} />
-                      <Route path="/login" element={<Login />} />
-                      <Route path="/register" element={<Register />} />
-                      <Route path="/verify-email" element={<VerifyEmail />} />
-                      <Route
-                        path="/dashboard"
-                        element={
-                          <ProtectedRoute>
-                            <Dashboard />
-                          </ProtectedRoute>
-                        }
-                      />
-                    </Routes>
+                    <WorkspacePage />
                   </Suspense>
-              </div>
-            }
-          />
-        </Routes>
-        <SpeedInsights />
-      </AuthProvider>
-    </BrowserRouter>
+                </ProtectedRoute>
+              }
+            />
+
+            {/* Public pages and workspace management share a restrained site theme. */}
+            <Route
+              path="*"
+              element={
+                <div className="site-shell">
+                    <Suspense fallback={<RouteFallback />}>
+                      <Routes>
+                        <Route path="/" element={<Landing />} />
+                        <Route path="/login" element={<Login />} />
+                        <Route path="/register" element={<Register />} />
+                        <Route path="/verify-email" element={<VerifyEmail />} />
+                        <Route
+                          path="/dashboard"
+                          element={
+                            <ProtectedRoute>
+                              <Dashboard />
+                            </ProtectedRoute>
+                          }
+                        />
+                      </Routes>
+                    </Suspense>
+                </div>
+              }
+            />
+          </Routes>
+          <SpeedInsights />
+        </AuthProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   );
 }
 

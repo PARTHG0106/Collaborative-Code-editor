@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { Code2, Eye, EyeOff } from 'lucide-react';
 import { getAuthDestination } from './authNavigation';
 import { GoogleSignIn } from '../components/GoogleSignIn';
+import { ThemeToggle } from '../components/ThemeToggle';
 import './AuthPages.css';
 
 export const Register: React.FC = () => {
@@ -72,10 +73,13 @@ export const Register: React.FC = () => {
   return (
     <main className="auth-page">
       <div className="auth-page-content">
-        <Link to="/" aria-label="SyncScript home" className="site-brand auth-page-brand">
-          <Code2 size={20} aria-hidden="true" />
-          <span>syncscript</span>
-        </Link>
+        <div className="auth-page-topline">
+          <Link to="/" aria-label="SyncScript home" className="site-brand auth-page-brand">
+            <Code2 size={20} aria-hidden="true" />
+            <span>syncscript</span>
+          </Link>
+          <ThemeToggle />
+        </div>
         <header className="auth-page-heading">
           <h1>Create an account</h1>
           <p>A shared place for your code.</p>

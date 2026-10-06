@@ -657,8 +657,8 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   };
 
   // Loading state
-  if (loading) return <div className="ide-root ide-dark" style={{ alignItems: 'center', justifyContent: 'center' }}><Loader2 size={24} className="animate-spin" style={{ color: 'var(--ide-accent)' }} /></div>;
-  if (!workspace) return <div className="ide-root ide-dark" style={{ alignItems: 'center', justifyContent: 'center', gap: 8 }}><span>Failed to load workspace</span><button className="ide-btn" onClick={onBack}>Back</button></div>;
+  if (loading) return <div className={`ide-root ${theme === 'dark' ? 'ide-dark' : ''}`} style={{ alignItems: 'center', justifyContent: 'center' }}><Loader2 size={24} className="animate-spin" style={{ color: 'var(--ide-accent)' }} /></div>;
+  if (!workspace) return <div className={`ide-root ${theme === 'dark' ? 'ide-dark' : ''}`} style={{ alignItems: 'center', justifyContent: 'center', gap: 8 }}><span>Failed to load workspace</span><button className="ide-btn" onClick={onBack}>Back</button></div>;
 
   const isOwner = workspace.currentUserRole === 'OWNER';
   const editorLang = activeFile ? getLanguage(activeFile.name) : 'plaintext';

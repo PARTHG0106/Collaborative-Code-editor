@@ -4,6 +4,7 @@ import React from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { VerifyEmail } from './VerifyEmail';
 import { useAuth } from '../context/AuthContext';
+import { ThemeProvider } from '../context/ThemeContext';
 
 // Mock AuthContext
 vi.mock('../context/AuthContext', () => {
@@ -30,9 +31,11 @@ describe('VerifyEmail Component', () => {
 
   const renderWithRouter = () => {
     return render(
-      <BrowserRouter>
-        <VerifyEmail />
-      </BrowserRouter>
+      <ThemeProvider>
+        <BrowserRouter>
+          <VerifyEmail />
+        </BrowserRouter>
+      </ThemeProvider>
     );
   };
 
