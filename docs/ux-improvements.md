@@ -26,6 +26,15 @@ keyboard access, and the existing editor behavior remain available.
 - Content search reports invalid regular expressions and opens matching lines
   after the selected file has synchronized. Results are capped at 200 lines.
 - Focus mode hides both side panels and restores their previous visibility.
+- Returning to a workspace restores up to 50 open file tabs, the active file,
+  cursor positions, and expanded folders. Deleted files are skipped; explicit
+  search results still open at their matching line. Closing tabs updates the
+  saved session, including when all tabs are closed.
+- Sessions are saved per account and workspace on this browser. They contain
+  navigation metadata only; file contents load from the server. Existing unsaved
+  change warnings still apply, and a failed initial load does not erase a session.
+  If loading is retried, any tabs or folders changed during the wait take
+  precedence over the previous session.
 
 ## Personal settings and collaboration
 

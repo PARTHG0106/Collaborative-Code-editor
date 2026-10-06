@@ -16,6 +16,7 @@ export interface FileSystemItem {
 interface UseFileSystemReturn {
   files: FileSystemItem[];
   filesLoading: boolean;
+  hasLoadedFiles: boolean;
   activeFileId: string | null;
   setActiveFileId: React.Dispatch<React.SetStateAction<string | null>>;
   expandedFolders: Set<string>;
@@ -35,6 +36,7 @@ export function useFileSystem(workspaceId: string, socket?: Socket | null): UseF
   const [files, setFilesState] = useState<FileSystemItem[]>([]);
   const filesRef = useRef<FileSystemItem[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
+  const [hasLoadedFiles, setHasLoadedFiles] = useState(false);
   const [activeFileId, setActiveFileIdState] = useState<string | null>(null);
   const activeFileRef = useRef<string | null>(null);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
@@ -64,6 +66,7 @@ export function useFileSystem(workspaceId: string, socket?: Socket | null): UseF
     setExpandedFolders(new Set());
     setSaveStatus('saved');
     setFilesLoading(false);
+    setHasLoadedFiles(false);
     saveIdsRef.current = new Map();
     saveQueuesRef.current = new Map();
     return () => { scope.active = false; };
@@ -87,7 +90,7 @@ export function useFileSystem(workspaceId: string, socket?: Socket | null): UseF
       setFilesLoading(true);
       const res = await apiClient.get(`/workspaces/${workspaceId}/files`);
       if (!scope.active || fetchId !== fetchIdRef.current) return;
-      if (res.data && res.data.success) {
+      if (res.data?.success === true && Array.isArray(res.data.data)) {
         const current = new Map(filesRef.current.map(item => [item.id, item]));
         const incoming = res.data.data as FileSystemItem[];
         const incomingIds = new Set(incoming.map(item => item.id));
@@ -112,6 +115,7 @@ export function useFileSystem(workspaceId: string, socket?: Socket | null): UseF
         }
         setFiles(merged);
         removeMissingSelection(merged);
+        setHasLoadedFiles(true);
       }
     } catch (err: any) {
       console.error('Failed to load file tree:', err);
@@ -242,6 +246,7 @@ export function useFileSystem(workspaceId: string, socket?: Socket | null): UseF
   return {
     files,
     filesLoading,
+    hasLoadedFiles,
     activeFileId,
     setActiveFileId,
     expandedFolders,

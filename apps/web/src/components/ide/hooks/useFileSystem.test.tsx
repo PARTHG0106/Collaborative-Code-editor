@@ -28,6 +28,33 @@ describe('useFileSystem collaboration', () => {
     apiClient.delete.mockResolvedValue(response({}));
   });
 
+  it('marks a listing ready only after a successful response and resets readiness for another workspace', async () => {
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { result, rerender } = renderHook(({ workspaceId }) => useFileSystem(workspaceId), {
+        initialProps: { workspaceId: 'workspace-a' },
+      });
+      expect(result.current.hasLoadedFiles).toBe(false);
+      apiClient.get.mockRejectedValueOnce(new Error('Offline'))
+        .mockResolvedValueOnce({ data: { success: false } })
+        .mockResolvedValueOnce(response({ files: [] }))
+        .mockResolvedValueOnce(response([]))
+        .mockRejectedValueOnce(new Error('Refresh failed'));
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await act(async () => { await result.current.fetchFiles(); });
+        expect(result.current.hasLoadedFiles).toBe(false);
+      }
+      await act(async () => { await result.current.fetchFiles(); });
+      expect(result.current.hasLoadedFiles).toBe(true);
+      await act(async () => { await result.current.fetchFiles(); });
+      expect(result.current.hasLoadedFiles).toBe(true);
+      rerender({ workspaceId: 'workspace-b' });
+      expect(result.current.hasLoadedFiles).toBe(false);
+    } finally {
+      quiet.mockRestore();
+    }
+  });
+
   it('removes every descendant and clears the selected file and expanded folders after a folder deletion', async () => {
     const { result } = renderHook(() => useFileSystem('workspace-a'));
     act(() => {

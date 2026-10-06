@@ -2,10 +2,12 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDELayout } from './IDELayout';
+import { readEditorSession, writeEditorSession, type EditorSession } from '../../lib/editorSession';
 
 const mocks = vi.hoisted(() => ({
   apiClient: { get: vi.fn(), post: vi.fn(), patch: vi.fn(), delete: vi.fn() },
   socket: null as any,
+  userId: 'self',
   onCursor: null as null | ((event: any) => void),
   onEditorChange: null as null | ((value: string, event: any) => void),
   onModelChange: null as null | ((event: any) => void),
@@ -31,7 +33,7 @@ vi.mock('../../lib/workspaceExport', () => ({
 }));
 
 vi.mock('../../context/AuthContext', () => ({
-  useAuth: () => ({ apiClient: mocks.apiClient, user: { id: 'self', name: 'Self' } }),
+  useAuth: () => ({ apiClient: mocks.apiClient, user: { id: mocks.userId, name: 'Self' } }),
 }));
 
 vi.mock('./hooks/useWorkspaceSocket', () => ({
@@ -46,16 +48,23 @@ vi.mock('./hooks/useWorkspaceSocket', () => ({
 // Exercise the real file cache, edit queue, selection, and snapshot handlers.
 // Only Monaco and unrelated execution surfaces are replaced in this DOM test.
 vi.mock('@monaco-editor/react', async () => {
-  const { useEffect } = await import('react');
+  const { useEffect, useRef } = await import('react');
   return {
     default: function MockEditor({ value, onChange, onMount, options, path }: any) {
       mocks.onEditorChange = onChange;
+      const valueRef = useRef(value);
+      valueRef.current = value;
       useEffect(() => {
-        const mount = () => onMount?.({
-          setPosition: mocks.setPosition,
+        let disposed = false;
+        let cursorListener: ((event: any) => void) | null = null;
+        const disposeListeners: Array<() => void> = [];
+        const mount = () => !disposed && onMount?.({
+          setPosition: (position: any) => { mocks.setPosition(position); cursorListener?.({ position, reason: 3 }); },
           revealLineInCenter: mocks.revealLineInCenter,
           focus: mocks.editorFocus,
           getModel: () => ({
+            getLineCount: () => valueRef.current.split('\n').length,
+            getLineMaxColumn: (lineNumber: number) => (valueRef.current.split('\n')[lineNumber - 1]?.length ?? 0) + 1,
             getOffsetAt: (position: { column: number }) => position.column - 1,
             getEOL: () => mocks.modelEOL,
             setEOL: () => { mocks.modelEOL = '\n'; },
@@ -65,13 +74,15 @@ vi.mock('@monaco-editor/react', async () => {
             },
           }),
           onDidChangeCursorPosition: (listener: (event: any) => void) => {
+            cursorListener = listener;
             mocks.onCursor = listener;
-            return { dispose: vi.fn() };
+            return { dispose: () => { if (mocks.onCursor === listener) mocks.onCursor = null; cursorListener = null; } };
           },
-          onDidDispose: vi.fn(),
+          onDidDispose: (listener: () => void) => { disposeListeners.push(listener); },
         }, { editor: { EndOfLineSequence: { LF: 0 } } });
         mocks.mountEditor = mount;
         if (!mocks.deferEditorMount) mount();
+        return () => { disposed = true; disposeListeners.forEach(listener => listener()); };
       }, []);
       useEffect(() => {
         // Monaco may notify after a controlled value replacement. Such a
@@ -125,7 +136,7 @@ class FakeSocket {
 }
 
 const file = (id: string, content: string, name = `${id}.ts`) => ({
-  id, name, content, parentId: null, workspaceId: 'workspace', type: 'FILE', createdAt: '', updatedAt: '',
+  id, name, content, parentId: null as string | null, workspaceId: 'workspace', type: 'FILE', createdAt: '', updatedAt: '',
 });
 const response = (data: unknown) => ({ data: { success: true, data } });
 
@@ -136,6 +147,8 @@ describe('IDE collaborative editing', () => {
   beforeEach(() => {
     vi.resetAllMocks();
     localStorage.clear();
+    mocks.userId = 'self';
+    mocks.onCursor = null;
     mocks.deferEditorMount = false;
     mocks.mountEditor = null;
     mocks.remoteInput = null;
@@ -168,6 +181,276 @@ describe('IDE collaborative editing', () => {
   }
 
   const edits = () => socket.emit.mock.calls.filter(([event]) => event === 'edit_file');
+
+  function saveSession(overrides: Partial<EditorSession> = {}, userId = 'self') {
+    const session: EditorSession = {
+      version: 1, openFileIds: ['beta', 'alpha'], activeFileId: 'alpha',
+      positions: { alpha: { lineNumber: 2, column: 3 } }, expandedFolderIds: [], ...overrides,
+    };
+    writeEditorSession(userId, 'workspace', session);
+    return session;
+  }
+
+  it('restores ordered valid tabs and expanded folders, then clamps the cursor against synchronized content without focusing', async () => {
+    files = [...files, { ...file('folder', ''), name: 'src', type: 'FOLDER' }];
+    files[0].parentId = 'folder';
+    saveSession({ openFileIds: ['missing', 'beta', 'folder', 'alpha'], expandedFolderIds: ['folder', 'missing', 'alpha'], positions: { alpha: { lineNumber: 90, column: 80 } } });
+    await act(async () => { render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />); });
+    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    expect(screen.getAllByRole('button', { name: /^Close (alpha|beta)\.ts$/ }).map(button => button.getAttribute('aria-label'))).toEqual(['Close beta.ts', 'Close alpha.ts']);
+    expect(screen.getByRole('button', { name: 'alpha.ts' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('alpha.ts', { selector: '.ide-tree-node-name' })).toBeInTheDocument();
+    expect(readEditorSession('self', 'workspace')).toMatchObject({ openFileIds: ['beta', 'alpha'], activeFileId: 'alpha', expandedFolderIds: ['folder'] });
+    expect(mocks.setPosition).not.toHaveBeenCalled();
+    act(() => { mocks.onCursor?.({ position: { lineNumber: 1, column: 1 }, reason: 1 }); });
+    act(() => { socket.receive('file_init', { fileId: 'alpha', content: 'first\nlast', version: 0 }); });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 5 }));
+    expect(mocks.editorFocus).not.toHaveBeenCalled();
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    expect(readEditorSession('self', 'workspace')?.positions.alpha).toEqual({ lineNumber: 2, column: 5 });
+    expect(edits()).toHaveLength(0);
+  });
+
+  it('preserves the saved session through an initial listing failure and restores after a successful retry', async () => {
+    const saved = saveSession();
+    const get = mocks.apiClient.get.getMockImplementation()!;
+    let rejectListing = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.apiClient.get.mockImplementation((url: string) => {
+      if (url.endsWith('/files') && rejectListing) return Promise.reject(new Error('Offline'));
+      return get(url);
+    });
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByTitle('Back to Dashboard');
+    expect(screen.queryByRole('textbox', { name: 'Code editor' })).not.toBeInTheDocument();
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    expect(readEditorSession('self', 'workspace')).toEqual(saved);
+    rejectListing = false;
+    await act(async () => { socket.receive('workspace_files_changed', { workspaceId: 'workspace' }); });
+    expect(screen.getByRole('button', { name: 'alpha.ts' })).toHaveAttribute('aria-pressed', 'true');
+    expect(readEditorSession('self', 'workspace')?.openFileIds).toEqual(['beta', 'alpha']);
+  });
+
+  it('waits for workspace authorization before restoring a successful file listing', async () => {
+    const saved = saveSession();
+    const get = mocks.apiClient.get.getMockImplementation()!;
+    let authorize!: (value: unknown) => void;
+    const authorization = new Promise(resolve => { authorize = resolve; });
+    mocks.apiClient.get.mockImplementation((url: string) => url === '/workspaces/workspace' ? authorization : get(url));
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await waitFor(() => expect(mocks.apiClient.get).toHaveBeenCalledWith('/workspaces/workspace/files'));
+    expect(socket.emit).not.toHaveBeenCalledWith('join_file', expect.anything());
+    expect(readEditorSession('self', 'workspace')).toEqual(saved);
+    await act(async () => { authorize(response({ id: 'workspace', name: 'Test Workspace', members: [], currentUserRole: 'OWNER' })); });
+    expect(screen.getByRole('button', { name: 'alpha.ts' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it.each([false, true])('preserves explicit tab choices made before the first successful listing (close all: %s)', async (closeAll) => {
+    const saved = saveSession();
+    const get = mocks.apiClient.get.getMockImplementation()!;
+    let rejectListing = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.apiClient.get.mockImplementation((url: string) => {
+      if (url.endsWith('/files') && rejectListing) return Promise.reject(new Error('Offline'));
+      return get(url);
+    });
+    const created = file('created', '', 'created.ts');
+    mocks.apiClient.post.mockResolvedValue(response(created));
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByTitle('New File'));
+    const input = screen.getByPlaceholderText('file.txt');
+    fireEvent.change(input, { target: { value: created.name } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await screen.findByRole('button', { name: 'Close created.ts' });
+    if (closeAll) fireEvent.click(screen.getByRole('button', { name: 'Close created.ts' }));
+    expect(readEditorSession('self', 'workspace')).toEqual(saved);
+
+    files = [...files, created];
+    rejectListing = false;
+    await act(async () => { socket.receive('workspace_files_changed', { workspaceId: 'workspace' }); });
+
+    expect(screen.queryByRole('button', { name: 'Close alpha.ts' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close beta.ts' })).not.toBeInTheDocument();
+    if (closeAll) {
+      expect(screen.queryByRole('textbox', { name: 'Code editor' })).not.toBeInTheDocument();
+    } else {
+      expect(screen.getByRole('button', { name: 'created.ts' })).toHaveAttribute('aria-pressed', 'true');
+    }
+    expect(readEditorSession('self', 'workspace')).toMatchObject({
+      openFileIds: closeAll ? [] : ['created'], activeFileId: closeAll ? null : 'created',
+    });
+  });
+
+  it('preserves explicit folder expansion made before the first successful listing', async () => {
+    saveSession({ expandedFolderIds: ['old-folder'] });
+    const get = mocks.apiClient.get.getMockImplementation()!;
+    let rejectListing = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    mocks.apiClient.get.mockImplementation((url: string) => {
+      if (url.endsWith('/files') && rejectListing) return Promise.reject(new Error('Offline'));
+      return get(url);
+    });
+    const folder = { ...file('created-folder', ''), name: 'created-folder', type: 'FOLDER' };
+    mocks.apiClient.post.mockResolvedValue(response(folder));
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    fireEvent.click(await screen.findByTitle('New Folder'));
+    const input = screen.getByPlaceholderText('folder_name');
+    fireEvent.change(input, { target: { value: folder.name } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.click(await screen.findByText(folder.name));
+
+    files = [...files, folder, { ...folder, id: 'old-folder', name: 'old-folder' }];
+    rejectListing = false;
+    await act(async () => { socket.receive('workspace_files_changed', { workspaceId: 'workspace' }); });
+
+    expect(readEditorSession('self', 'workspace')?.expandedFolderIds).toEqual(['created-folder']);
+    expect(screen.getByRole('button', { name: 'alpha.ts' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('restores when synchronization finishes before Monaco mounts and lets a pending search line override the saved cursor', async () => {
+    mocks.deferEditorMount = true;
+    files = [file('alpha', 'header\nneedle\nfooter')];
+    saveSession({ openFileIds: ['alpha'], positions: { alpha: { lineNumber: 3, column: 4 } } });
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    fireEvent.keyDown(window, { key: 'F', ctrlKey: true, shiftKey: true });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search file contents' }), { target: { value: 'needle' } });
+    fireEvent.click(await screen.findByRole('button', { name: 'alpha.ts, line 2: needle' }));
+    act(() => { socket.receive('file_init', { fileId: 'alpha', content: files[0].content, version: 0 }); });
+    expect(mocks.setPosition).not.toHaveBeenCalled();
+    act(() => { mocks.mountEditor?.(); });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 1 }));
+    expect(mocks.setPosition).toHaveBeenCalledTimes(1);
+    expect(mocks.editorFocus).toHaveBeenCalled();
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    expect(readEditorSession('self', 'workspace')?.positions.alpha).toEqual({ lineNumber: 2, column: 1 });
+  });
+
+  it('restores a saved cursor after a delayed mount without an explicit navigation request', async () => {
+    mocks.deferEditorMount = true;
+    saveSession();
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    act(() => { socket.receive('file_init', { fileId: 'alpha', content: 'first\nsecond', version: 0 }); });
+    act(() => { mocks.mountEditor?.(); });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 3 }));
+    expect(mocks.editorFocus).not.toHaveBeenCalled();
+  });
+
+  it('remembers positions between tabs, debounces cursor writes, and flushes metadata on pagehide and unmount', async () => {
+    saveSession({ positions: { alpha: { lineNumber: 1, column: 3 }, beta: { lineNumber: 2, column: 2 } } });
+    const view = render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    act(() => { socket.receive('file_init', { fileId: 'alpha', content: 'live alpha', version: 0 }); });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 1, column: 3 }));
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    const writes = vi.spyOn(Storage.prototype, 'setItem');
+    act(() => {
+      mocks.onCursor?.({ position: { lineNumber: 1, column: 4 } });
+      mocks.onCursor?.({ position: { lineNumber: 1, column: 7 } });
+    });
+    expect(writes).not.toHaveBeenCalled();
+    fireEvent.keyDown(window, { key: 'p', ctrlKey: true });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Find a file by name or path' }), { target: { value: 'beta' } });
+    fireEvent.keyDown(screen.getByRole('combobox', { name: 'Find a file by name or path' }), { key: 'Enter' });
+    act(() => { socket.receive('file_init', { fileId: 'beta', content: 'first\nsecond', version: 0 }); });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 2 }));
+    expect(mocks.editorFocus).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'alpha.ts' }));
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenLastCalledWith({ lineNumber: 1, column: 7 }));
+    act(() => { mocks.onCursor?.({ position: { lineNumber: 1, column: 8 } }); window.dispatchEvent(new Event('pagehide')); });
+    expect(readEditorSession('self', 'workspace')?.positions.alpha).toEqual({ lineNumber: 1, column: 8 });
+    act(() => { mocks.onCursor?.({ position: { lineNumber: 1, column: 9 } }); });
+    view.unmount();
+    expect(readEditorSession('self', 'workspace')?.positions.alpha).toEqual({ lineNumber: 1, column: 9 });
+    const stored = writes.mock.calls.filter(([key]) => key.includes('editor-session')).map(([, value]) => value).join('');
+    expect(stored).not.toContain('live alpha');
+    expect(stored).not.toContain('content');
+  });
+
+  it('keeps the live cursor through snapshot previews and restores it when returning to editing', async () => {
+    saveSession({ positions: { alpha: { lineNumber: 1, column: 4 } } });
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    act(() => { socket.receive('file_init', { fileId: 'alpha', content: 'live alpha', version: 0 }); });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 1, column: 4 }));
+    act(() => { mocks.onCursor?.({ position: { lineNumber: 1, column: 8 } }); });
+    const liveCursor = mocks.onCursor;
+    fireEvent.click(screen.getByTitle('Snapshots'));
+    fireEvent.click(await screen.findByRole('button', { name: 'View' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: 'Code editor' })).toHaveValue('historical alpha'));
+    act(() => { liveCursor?.({ position: { lineNumber: 1, column: 1 } }); window.dispatchEvent(new Event('pagehide')); });
+    expect(readEditorSession('self', 'workspace')?.positions.alpha).toEqual({ lineNumber: 1, column: 8 });
+    fireEvent.click(screen.getByRole('button', { name: 'Back to editing' }));
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenLastCalledWith({ lineNumber: 1, column: 8 }));
+    expect(edits()).toHaveLength(0);
+  });
+
+  it('isolates accounts that open the same workspace and ignores the previous account editor callbacks', async () => {
+    saveSession({ openFileIds: ['alpha'], positions: { alpha: { lineNumber: 1, column: 4 } } });
+    const other = saveSession({ openFileIds: ['beta'], activeFileId: 'beta', positions: { beta: { lineNumber: 1, column: 2 } } }, 'other');
+    const view = render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    act(() => { socket.receive('file_init', { fileId: 'alpha', content: 'live alpha', version: 0 }); });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 1, column: 4 }));
+    act(() => { mocks.onCursor?.({ position: { lineNumber: 1, column: 6 } }); });
+    const previousCursor = mocks.onCursor;
+    mocks.userId = 'other';
+    view.rerender(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Close beta.ts' });
+    expect(screen.queryByRole('button', { name: 'Close alpha.ts' })).not.toBeInTheDocument();
+    expect(readEditorSession('other', 'workspace')).toEqual(other);
+    act(() => { previousCursor?.({ position: { lineNumber: 1, column: 1 } }); socket.receive('file_init', { fileId: 'beta', content: 'live beta', version: 0 }); });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenLastCalledWith({ lineNumber: 1, column: 2 }));
+    expect(readEditorSession('self', 'workspace')?.positions.alpha).toEqual({ lineNumber: 1, column: 6 });
+  });
+
+  it('persists closed and deleted tabs without reopening them on subsequent tree refreshes', async () => {
+    saveSession();
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    fireEvent.click(screen.getByRole('button', { name: 'Close beta.ts' }));
+    await act(async () => { socket.receive('workspace_files_changed', { workspaceId: 'workspace' }); });
+    expect(screen.queryByRole('button', { name: 'Close beta.ts' })).not.toBeInTheDocument();
+    expect(readEditorSession('self', 'workspace')?.openFileIds).toEqual(['alpha']);
+    files = [file('beta', 'cached beta')];
+    await act(async () => { socket.receive('workspace_files_changed', { workspaceId: 'workspace' }); });
+    expect(readEditorSession('self', 'workspace')).toMatchObject({ openFileIds: [], activeFileId: null, positions: {} });
+    expect(screen.queryByRole('textbox', { name: 'Code editor' })).not.toBeInTheDocument();
+  });
+
+  it('reopens a notebook without treating its cell editors as the main text cursor', async () => {
+    const notebook = JSON.stringify({ cells: [{ cell_type: 'code', source: ['print(1)'], outputs: [] }] });
+    files = [file('notebook', notebook, 'notes.ipynb')];
+    saveSession({ openFileIds: ['notebook'], activeFileId: 'notebook', positions: {} });
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Close notes.ipynb' });
+    act(() => { socket.receive('file_init', { fileId: 'notebook', content: notebook, version: 0 }); });
+    expect(screen.getByRole('textbox', { name: 'Code editor' })).toHaveValue('print(1)');
+    expect(mocks.onCursor).toBeNull();
+    expect(mocks.setPosition).not.toHaveBeenCalled();
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    expect(readEditorSession('self', 'workspace')).toMatchObject({ openFileIds: ['notebook'], activeFileId: 'notebook', positions: {} });
+    expect(edits()).toHaveLength(0);
+  });
+
+  it('does not replay an initial cursor restoration on reconnect or save a model-flush default', async () => {
+    saveSession({ positions: { alpha: { lineNumber: 1, column: 3 } } });
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    act(() => { socket.receive('file_init', { fileId: 'alpha', content: 'live alpha', version: 0 }); });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 1, column: 3 }));
+    act(() => { mocks.onCursor?.({ position: { lineNumber: 1, column: 6 } }); });
+    mocks.setPosition.mockClear();
+    act(() => { socket.connected = false; socket.receive('disconnect'); });
+    await act(async () => { socket.connected = true; socket.receive('connect'); });
+    act(() => { socket.receive('file_init', { fileId: 'alpha', content: 'new live alpha', version: 1 }); });
+    act(() => { mocks.onCursor?.({ position: { lineNumber: 1, column: 1 }, reason: 1 }); });
+    await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
+    expect(mocks.setPosition).not.toHaveBeenCalled();
+    act(() => { window.dispatchEvent(new Event('pagehide')); });
+    expect(readEditorSession('self', 'workspace')?.positions.alpha).toEqual({ lineNumber: 1, column: 6 });
+  });
 
   it('downloads a fresh workspace listing with unsaved editor contents and keeps edits pending', async () => {
     await openAlpha();
@@ -243,7 +526,7 @@ describe('IDE collaborative editing', () => {
     });
     expect(mocks.setPosition).not.toHaveBeenCalled();
     act(() => { mocks.mountEditor?.(); });
-    expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 1 });
+    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 1 }));
     expect(screen.getByText('Ln 2, Col 1')).toBeInTheDocument();
   });
 

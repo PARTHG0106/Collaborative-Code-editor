@@ -7,6 +7,8 @@ import { TopBar } from './TopBar';
 import { QuickOpen } from './QuickOpen';
 import { getFilePath } from './filePaths';
 import { useEditorPreferences } from './hooks/useEditorPreferences';
+import { useEditorSession } from './hooks/useEditorSession';
+import { reconcileEditorSession } from '../../lib/editorSession';
 import { useWorkspaceDownloads } from './hooks/useWorkspaceDownloads';
 import { ExplorerPanel } from './sidebar/ExplorerPanel';
 import { SearchPanel } from './sidebar/SearchPanel';
@@ -99,6 +101,10 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const pendingNavigationRef = useRef<{ fileId: string; lineNumber?: number } | null>(null);
   const [openTabs, setOpenTabs] = useState<FileSystemItem[]>([]);
   const [preview, setPreview] = useState<{ fileId: string; content: string } | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const tabsTouchedRef = useRef(false);
+  const foldersTouchedRef = useRef(false);
+  const { savedSession, saveNavigation, getPosition, savePosition } = useEditorSession(user?.id, workspaceId);
 
   // Execution state
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -201,22 +207,39 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   const cursorSocketRef = useRef(ws.socket);
   cursorSocketRef.current = ws.socket;
   const editorRef = useRef<any>(null);
+  const mountedEditorRef = useRef<{ editor: any; fileId: string; restored: boolean } | null>(null);
+  const collaborationReadyRef = useRef(collaboration.ready);
+  collaborationReadyRef.current = collaboration.ready;
   const monacoRef = useRef<any>(null);
   const decorationsRef = useRef<Map<string, string[]>>(new Map());
   const revealPendingLine = useCallback(() => {
     const pending = pendingNavigationRef.current;
     const editor = editorRef.current;
-    if (!pending || pending.fileId !== fs.activeFileId || !editor || activeFile?.name.endsWith('.ipynb')) return;
-    if (pending.lineNumber) {
-      if (!collaboration.ready) return;
-      const lineNumber = Math.min(pending.lineNumber, editor.getModel()?.getLineCount?.() ?? pending.lineNumber);
-      editor.setPosition({ lineNumber, column: 1 });
-      editor.revealLineInCenter(lineNumber);
-      setCursorPosition({ lineNumber, column: 1 });
+    const mounted = mountedEditorRef.current;
+    if (!editor || !mounted || mounted.editor !== editor || mounted.fileId !== fs.activeFileId
+      || preview?.fileId === fs.activeFileId || getLanguage(activeFile?.name ?? '') === 'jupyter') return;
+    const navigation = pending?.fileId === mounted.fileId ? pending : null;
+    if (navigation?.lineNumber && !collaboration.ready) return;
+    if (collaboration.ready && (!mounted.restored || navigation?.lineNumber)) {
+      const target = navigation?.lineNumber
+        ? { lineNumber: navigation.lineNumber, column: 1 }
+        : getPosition(mounted.fileId);
+      mounted.restored = true;
+      if (target) {
+        const model = editor.getModel();
+        const lineNumber = Math.max(1, Math.min(target.lineNumber, model.getLineCount()));
+        const position = { lineNumber, column: Math.max(1, Math.min(target.column, model.getLineMaxColumn(lineNumber))) };
+        editor.setPosition(position);
+        editor.revealLineInCenter(lineNumber);
+        setCursorPosition(position);
+        savePosition(mounted.fileId, position);
+      }
     }
-    editor.focus();
-    pendingNavigationRef.current = null;
-  }, [fs.activeFileId, collaboration.ready, activeFile?.name]);
+    if (navigation) {
+      editor.focus();
+      pendingNavigationRef.current = null;
+    }
+  }, [fs.activeFileId, collaboration.ready, activeFile?.name, preview, getPosition, savePosition]);
   // Monaco retains its initial onMount callback while its loader is pending.
   const revealPendingLineRef = useRef(revealPendingLine);
   revealPendingLineRef.current = revealPendingLine;
@@ -282,6 +305,32 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   // Fetch files
   useEffect(() => { fs.fetchFiles(); }, []);
 
+  useEffect(() => {
+    if (sessionReady || loading || workspace?.id !== workspaceId || !user?.id || !fs.hasLoadedFiles) return;
+    if (savedSession) {
+      const restored = reconcileEditorSession(savedSession, fs.files);
+      const filesById = new Map(fs.files.map(file => [file.id, file]));
+      // A retry may finish after the user has created files or closed tabs.
+      // Their current navigation takes precedence over the previous session.
+      if (!tabsTouchedRef.current) {
+        setOpenTabs(restored.openFileIds.map(id => filesById.get(id)!));
+        fs.setActiveFileId(restored.activeFileId);
+      }
+      if (!foldersTouchedRef.current) {
+        fs.setExpandedFolders(current => new Set([...restored.expandedFolderIds, ...current]));
+      }
+    }
+    // Persist on the next render, after the restored tabs and selection commit.
+    setSessionReady(true);
+  }, [sessionReady, loading, workspace?.id, workspaceId, user?.id, fs.hasLoadedFiles, fs.files, fs.setActiveFileId, fs.setExpandedFolders, savedSession]);
+
+  // Contents change on each edit; only navigation changes trigger an immediate write.
+  const openFileIdsKey = JSON.stringify(openTabs.map(file => file.id));
+  const expandedFolderIdsKey = JSON.stringify([...fs.expandedFolders]);
+  useEffect(() => {
+    if (sessionReady) saveNavigation(JSON.parse(openFileIdsKey), fs.activeFileId, JSON.parse(expandedFolderIdsKey));
+  }, [sessionReady, openFileIdsKey, fs.activeFileId, expandedFolderIdsKey, saveNavigation]);
+
   // Each opened document drains its edit queue independently of the active tab.
   useEffect(() => {
     if (activeFile?.name.endsWith('.ipynb')) setNotebookCells(parseNotebook(editorContent));
@@ -294,12 +343,12 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   }, [fs.activeFileId]);
 
   useEffect(() => {
-    if (fs.filesLoading) return;
+    if (!fs.hasLoadedFiles || fs.filesLoading) return;
     setOpenTabs(tabs => tabs.flatMap(tab => {
       const current = fs.files.find(file => file.id === tab.id);
-      return current ? [current] : [];
+      return current?.type === 'FILE' ? [current] : [];
     }));
-  }, [fs.files, fs.filesLoading]);
+  }, [fs.files, fs.filesLoading, fs.hasLoadedFiles]);
 
   useEffect(() => {
     const socket = ws.socket;
@@ -320,7 +369,11 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   }, [ws.socket, fs.activeFileId]);
 
   const handleEditorMount = (editor: any, monaco: any) => {
+    const fileId = fs.activeFileId;
+    if (!fileId || fileId !== activeFileIdRef.current) return;
     editorRef.current = editor;
+    const mounted = { editor, fileId, restored: false };
+    mountedEditorRef.current = mounted;
     setCursorPosition({ lineNumber: 1, column: 1 });
     monacoRef.current = monaco;
     // Monaco normalizes line endings in its model. Keep its view in LF and
@@ -334,9 +387,12 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     const modelSubscription = mountedModel?.onDidChangeContent((event: any) => {
       if (event.isFlush || event.isEolChange) ensureLF();
     });
-    const fileId = fs.activeFileId;
     const subscription = editor.onDidChangeCursorPosition((event: any) => {
-      setCursorPosition({ lineNumber: event.position.lineNumber || 1, column: event.position.column });
+      if (mountedEditorRef.current !== mounted || activeFileIdRef.current !== fileId) return;
+      const position = { lineNumber: event.position.lineNumber || 1, column: event.position.column };
+      setCursorPosition(position);
+      // Model flushes and pre-sync defaults must not erase a remembered cursor.
+      if (mounted.restored && collaborationReadyRef.current && event.reason !== 1) savePosition(fileId, position);
       // Token refresh can replace the socket without remounting this editor.
       const socket = cursorSocketRef.current;
       const model = editor.getModel();
@@ -345,8 +401,9 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     editor.onDidDispose(() => {
       subscription.dispose(); modelSubscription?.dispose();
       if (editorRef.current === editor) editorRef.current = null;
+      if (mountedEditorRef.current === mounted) mountedEditorRef.current = null;
     });
-    revealPendingLineRef.current();
+    requestAnimationFrame(() => revealPendingLineRef.current());
   };
 
   // Fetch versions when snapshots panel is active
@@ -364,6 +421,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
 
   // Handlers
   const selectFile = (file: FileSystemItem, lineNumber?: number) => {
+    tabsTouchedRef.current = true;
     if (lineNumber && !file.name.endsWith('.ipynb')) {
       pendingNavigationRef.current = { fileId: file.id, lineNumber };
       if (fs.activeFileId === file.id && !preview) revealPendingLine();
@@ -386,6 +444,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
   };
 
   const closeTab = (id: string) => {
+    tabsTouchedRef.current = true;
     setOpenTabs(prev => prev.filter(t => t.id !== id));
     if (fs.activeFileId === id) {
       const remaining = openTabs.filter(t => t.id !== id);
@@ -707,7 +766,10 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
               files={fs.files} filesLoading={fs.filesLoading} activeFileId={fs.activeFileId}
               expandedFolders={fs.expandedFolders} canModify={canModify}
               onSelectFile={selectFile}
-              onToggleFolder={id => fs.setExpandedFolders(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
+              onToggleFolder={id => {
+                foldersTouchedRef.current = true;
+                fs.setExpandedFolders(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+              }}
               onCreateFile={(name, type, parentId, content) => fs.createFile(name, type, parentId, content).then(item => { if (item && type === 'FILE') selectFile(item); return item; })}
               onRenameFile={fs.renameFile} onDeleteFile={fs.deleteFile}
               onDownloadWorkspace={() => void downloads.downloadWorkspace()}
@@ -931,8 +993,9 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
 };
 
 // --- Exported Component with Theme Provider ---
-export const IDELayout: React.FC<{ workspaceId: string; onBack: () => void }> = (props) => (
-  <IDEThemeProvider>
-    <IDEInner key={props.workspaceId} {...props} />
-  </IDEThemeProvider>
-);
+export const IDELayout: React.FC<{ workspaceId: string; onBack: () => void }> = (props) => {
+  const { user } = useAuth();
+  return <IDEThemeProvider>
+    <IDEInner key={JSON.stringify([user?.id, props.workspaceId])} {...props} />
+  </IDEThemeProvider>;
+};
