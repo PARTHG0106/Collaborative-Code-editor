@@ -151,6 +151,18 @@ export function useCollaborativeFiles(
     document?.dismissRecovery(recoveryId);
     setRevision(value => value + 1);
   }, []);
+  const getDownloadContents = useCallback((): ReadonlyMap<string, string> => {
+    const contents = new Map<string, string>();
+    for (const [fileId, document] of documents.current) {
+      // A fresh HTTP listing supplies unopened files and saved buffers that
+      // stopped receiving socket updates. Pending edits remain downloadable.
+      if (document.initialized && !deletedFiles.current.has(fileId)
+        && ((document.ready && socketRef.current?.connected) || document.status !== 'saved')) {
+        contents.set(fileId, document.content);
+      }
+    }
+    return contents;
+  }, []);
   useEffect(() => {
     const save = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 's') return;
@@ -179,6 +191,7 @@ export function useCollaborativeFiles(
     replaceContent,
     hasPendingChanges,
     dismissRecovery,
+    getDownloadContents,
     error,
     recoveries: Array.from(documents.current.entries())
       .flatMap(([fileId, doc]) => doc.recoveries.map(copy => ({ fileId, ...copy }))),

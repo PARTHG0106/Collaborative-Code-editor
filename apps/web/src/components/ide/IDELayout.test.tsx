@@ -15,11 +15,19 @@ const mocks = vi.hoisted(() => ({
   mountEditor: null as null | (() => void),
   remoteInput: null as null | ((input: string) => void),
   lineInput: null as null | ((input: string) => void),
+  createWorkspaceArchive: vi.fn(), createFileDownload: vi.fn(), downloadBlob: vi.fn(),
   terminalManager: {
     setRawMode: vi.fn(), setInputEnabled: vi.fn(), fit: vi.fn(), focus: vi.fn(),
     getDimensions: vi.fn(), onData: vi.fn(), onRawData: vi.fn(), onResize: vi.fn(),
     writeStdout: vi.fn(), writeStderr: vi.fn(), writeInfo: vi.fn(),
   },
+}));
+
+vi.mock('../../lib/workspaceExport', () => ({
+  createWorkspaceArchive: mocks.createWorkspaceArchive,
+  createFileDownload: mocks.createFileDownload,
+  downloadBlob: mocks.downloadBlob,
+  workspaceArchiveName: (name: string) => `${name}.zip`,
 }));
 
 vi.mock('../../context/AuthContext', () => ({
@@ -132,6 +140,8 @@ describe('IDE collaborative editing', () => {
     mocks.mountEditor = null;
     mocks.remoteInput = null;
     mocks.lineInput = null;
+    mocks.createWorkspaceArchive.mockResolvedValue(new Blob(['zip']));
+    mocks.createFileDownload.mockReturnValue(new Blob(['file']));
     mocks.terminalManager.getDimensions.mockReturnValue({ cols: 80, rows: 24 });
     mocks.terminalManager.onRawData.mockReturnValue(() => {});
     mocks.terminalManager.onResize.mockReturnValue(() => {});
@@ -158,6 +168,35 @@ describe('IDE collaborative editing', () => {
   }
 
   const edits = () => socket.emit.mock.calls.filter(([event]) => event === 'edit_file');
+
+  it('downloads a fresh workspace listing with unsaved editor contents and keeps edits pending', async () => {
+    await openAlpha();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Code editor' }), { target: { value: 'my unsaved alpha' } });
+    files = [file('alpha', 'server alpha'), file('beta', 'new remote beta')];
+    const editCount = edits().length;
+    fireEvent.click(screen.getByRole('button', { name: 'Download workspace ZIP' }));
+    await waitFor(() => expect(mocks.downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'Test Workspace.zip'));
+    expect(mocks.createWorkspaceArchive).toHaveBeenCalledWith(files, {
+      contentOverrides: new Map([['alpha', 'my unsaved alpha']]),
+    });
+    expect(screen.getByRole('textbox', { name: 'Code editor' })).toHaveValue('my unsaved alpha');
+    expect(edits()).toHaveLength(editCount);
+    expect(screen.getByText('Download started: Test Workspace.zip')).toBeInTheDocument();
+  });
+
+  it('lets viewers download files without opening them or exposing edit actions', async () => {
+    mocks.apiClient.get.mockImplementation(async (url: string) => url === '/workspaces/workspace'
+      ? response({ id: 'workspace', name: 'Viewed Workspace', members: [], currentUserRole: 'VIEWER' })
+      : response(files));
+    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
+    const download = await screen.findByRole('button', { name: 'Download alpha.ts' });
+    expect(screen.queryByRole('button', { name: 'Rename' })).not.toBeInTheDocument();
+    fireEvent.click(download);
+    await waitFor(() => expect(mocks.downloadBlob).toHaveBeenCalledWith(expect.any(Blob), 'alpha.ts'));
+    expect(mocks.createFileDownload).toHaveBeenCalledWith(files[0], undefined);
+    expect(screen.queryByRole('textbox', { name: 'Code editor' })).not.toBeInTheDocument();
+    expect(edits()).toHaveLength(0);
+  });
 
   it('jumps to a search result when opening a different file and when it is already open', async () => {
     files = [file('alpha', 'header\nneedle\nfooter')];
@@ -404,6 +443,10 @@ describe('IDE collaborative editing', () => {
     expect(screen.getByRole('textbox', { name: 'Code editor' })).toHaveProperty('readOnly', true);
     expect(edits()).toHaveLength(0);
     expect(mocks.apiClient.patch).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Explorer' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Download alpha.ts' }));
+    await waitFor(() => expect(mocks.createFileDownload).toHaveBeenCalledWith(expect.objectContaining({ id: 'alpha' }), 'live alpha'));
+    expect(screen.getByRole('textbox', { name: 'Code editor' })).toHaveValue('historical alpha');
     fireEvent.click(screen.getByRole('button', { name: 'Back to editing' }));
     expect(screen.getByRole('textbox', { name: 'Code editor' })).toHaveValue('live alpha');
     expect(edits()).toHaveLength(0);

@@ -14,6 +14,9 @@ keyboard access, and the existing editor behavior remain available.
 
 - Dashboard search matches workspace names and descriptions. Filter by your role,
   sort by name or date, and refresh to see newly added memberships.
+- Pin workspaces to keep them first within the chosen sort. **Pinned only** works
+  with search and role filters. Pins are personal to the signed-in account on
+  this browser and synchronize between its tabs.
 - Workspace creation keeps its draft and displays errors inside the dialog.
   Keyboard focus stays in the dialog and returns to its trigger when closed.
 - Open any file with **Ctrl/Cmd+P**. Search by folder or file name; arrow keys
@@ -37,6 +40,21 @@ keyboard access, and the existing editor behavior remain available.
 - Incoming messages preserve the reader's scroll position and offer a jump to
   the latest message. Unread badges account for the selected collaboration tab.
 - Presence, loading, and history errors have explicit feedback and recovery.
+
+## Downloading workspace files
+
+- The Explorer's download button creates a ZIP of its files and folders. Each
+  file row also has a download action, available to viewers as well as editors.
+- Downloads read a fresh authorized listing and include current editor buffers,
+  including changes that have not finished saving. Historical snapshot previews
+  do not replace live file contents in downloads. Preserved recovery copies keep
+  their separate download buttons.
+- ZIPs retain nested paths and empty folders. Recognized binary uploads are
+  restored to bytes; source and text files remain UTF-8 text. Invalid paths,
+  ambiguous extraction names, and failed requests produce visible errors.
+- Downloads support up to 50 MiB of file contents and 5,000 ZIP entries. Files
+  created only in the terminal, including installed dependencies, must first be
+  added to the Explorer to appear in these exports.
 
 ## Sign-in and accessibility
 

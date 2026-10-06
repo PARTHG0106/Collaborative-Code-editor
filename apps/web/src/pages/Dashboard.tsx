@@ -2,11 +2,12 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAuth } from '../context/AuthContext';
 import { Link, useNavigate } from 'react-router-dom';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { usePinnedWorkspaces } from '../hooks/usePinnedWorkspaces';
 import './Dashboard.css';
 import { 
   LogOut, FolderGit2, Code2,
   Plus, Users, ArrowRight,
-  X, Loader2, Search, RefreshCw
+  X, Loader2, Search, RefreshCw, Pin
 } from 'lucide-react';
 
 interface Workspace {
@@ -32,6 +33,9 @@ export const Dashboard: React.FC = () => {
   const [workspaceSearch, setWorkspaceSearch] = useState('');
   const [workspaceRole, setWorkspaceRole] = useState<'ALL' | Workspace['role']>('ALL');
   const [workspaceSort, setWorkspaceSort] = useState<'joined' | 'name' | 'created'>('joined');
+  const [pinnedOnly, setPinnedOnly] = useState(false);
+  const { pinnedWorkspaceIds, toggleWorkspacePin } = usePinnedWorkspaces(user?.id);
+  const hasPinnedWorkspaces = workspaces.some((workspace) => pinnedWorkspaceIds.has(workspace.id));
 
   // Workspace creation modal state
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -48,13 +52,16 @@ export const Dashboard: React.FC = () => {
     const query = workspaceSearch.trim().toLocaleLowerCase();
     return workspaces.filter((workspace) => (
       (workspaceRole === 'ALL' || workspace.role === workspaceRole)
+      && (!pinnedOnly || pinnedWorkspaceIds.has(workspace.id))
       && (!query || `${workspace.name} ${workspace.description || ''}`.toLocaleLowerCase().includes(query))
     )).sort((a, b) => {
+      const pinOrder = Number(pinnedWorkspaceIds.has(b.id)) - Number(pinnedWorkspaceIds.has(a.id));
+      if (pinOrder) return pinOrder;
       if (workspaceSort === 'name') return a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
       const dateKey = workspaceSort === 'created' ? 'createdAt' : 'joinedAt';
       return (Date.parse(b[dateKey]) || 0) - (Date.parse(a[dateKey]) || 0);
     });
-  }, [workspaces, workspaceSearch, workspaceRole, workspaceSort]);
+  }, [workspaces, workspaceSearch, workspaceRole, workspaceSort, pinnedOnly, pinnedWorkspaceIds]);
 
   const openCreateModal = (event: React.MouseEvent<HTMLButtonElement>) => {
     createTriggerRef.current = event.currentTarget;
@@ -257,12 +264,17 @@ export const Dashboard: React.FC = () => {
             </div>
           )}
 
-          {!loadingWorkspaces && !dashboardError && workspaces.length > 0 && (
-            <p className="workspace-result-count" role="status">
-              {visibleWorkspaces.length} of {workspaces.length} {workspaces.length === 1 ? 'workspace' : 'workspaces'}
-            </p>
+          {workspaces.length > 0 && (
+            <div className="workspace-list-summary">
+              <p className="workspace-result-count" role="status">
+                {loadingWorkspaces ? 'Refreshing workspaces...' : `${visibleWorkspaces.length} of ${workspaces.length} ${workspaces.length === 1 ? 'workspace' : 'workspaces'}`}
+              </p>
+              <button type="button" className="site-button workspace-pinned-filter" aria-pressed={pinnedOnly} onClick={() => setPinnedOnly((previous) => !previous)} title="Show your pinned workspaces on this browser">
+                <Pin size={13} aria-hidden="true" />
+                Pinned only
+              </button>
+            </div>
           )}
-          {loadingWorkspaces && workspaces.length > 0 && <p className="workspace-result-count" role="status">Refreshing workspaces...</p>}
 
           {loadingWorkspaces && workspaces.length === 0 ? (
             <div className="workspace-empty" role="status">
@@ -281,10 +293,10 @@ export const Dashboard: React.FC = () => {
             </div>
           ) : visibleWorkspaces.length === 0 ? (
             <div className="workspace-empty">
-              <Search size={24} aria-hidden="true" />
-              <h2>No matching workspaces</h2>
-              <p>Try a different search or show all roles.</p>
-              <button type="button" className="site-button" onClick={() => { setWorkspaceSearch(''); setWorkspaceRole('ALL'); }}>Clear filters</button>
+              {pinnedOnly && !hasPinnedWorkspaces ? <Pin size={24} aria-hidden="true" /> : <Search size={24} aria-hidden="true" />}
+              <h2>{pinnedOnly && !hasPinnedWorkspaces ? 'No pinned workspaces yet' : 'No matching workspaces'}</h2>
+              <p>{pinnedOnly && !hasPinnedWorkspaces ? 'Pin a workspace to keep it at the top of your list on this browser.' : 'Try a different search or clear your filters.'}</p>
+              <button type="button" className="site-button" onClick={() => { setWorkspaceSearch(''); setWorkspaceRole('ALL'); setPinnedOnly(false); }}>{pinnedOnly && !hasPinnedWorkspaces ? 'Show all workspaces' : 'Clear filters'}</button>
             </div>
           ) : (
             <div className="workspace-list" aria-busy={loadingWorkspaces}>
@@ -296,7 +308,7 @@ export const Dashboard: React.FC = () => {
                   const joinedDate = new Date(ws.joinedAt);
                   const hasJoinedDate = !Number.isNaN(joinedDate.getTime());
                   return (
-                    <li key={ws.id}>
+                    <li key={ws.id} className="workspace-list-item">
                       <Link
                         className="workspace-list-row"
                         to={`/workspace/${ws.id}`}
@@ -323,6 +335,16 @@ export const Dashboard: React.FC = () => {
                           {ws.role === 'OWNER' ? 'Manage workspace and members' : ws.role === 'EDITOR' ? 'Edit files and collaborate' : 'Read-only access'}
                         </span>
                       </Link>
+                      <button
+                        type="button"
+                        className="site-button workspace-pin-button"
+                        onClick={() => toggleWorkspacePin(ws.id)}
+                        aria-pressed={pinnedWorkspaceIds.has(ws.id)}
+                        aria-label={`${pinnedWorkspaceIds.has(ws.id) ? 'Unpin' : 'Pin'} ${ws.name}`}
+                        title={pinnedWorkspaceIds.has(ws.id) ? `Unpin ${ws.name}` : `Pin ${ws.name} to the top of your list on this browser`}
+                      >
+                        <Pin size={16} aria-hidden="true" />
+                      </button>
                     </li>
                   );
                 })}

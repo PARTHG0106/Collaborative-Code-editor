@@ -142,9 +142,30 @@
 }
 
 .workspace-page .workspace-result-count {
-  margin: 0 0 12px;
+  margin: 0;
   color: var(--site-muted);
   font-size: 12px;
+}
+
+.workspace-page .workspace-list-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -4px 0 12px;
+}
+
+.workspace-page .workspace-pinned-filter {
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.workspace-page .workspace-pinned-filter[aria-pressed="true"],
+.workspace-page .workspace-pin-button[aria-pressed="true"] {
+  color: var(--site-accent);
+  border-color: var(--site-accent);
+  background: var(--site-subtle);
 }
 
 .workspace-page .workspace-list {
@@ -172,6 +193,24 @@
   border-bottom: 1px solid var(--site-border);
   color: var(--site-muted);
   font-size: 11px;
+  padding-right: 60px;
+}
+
+.workspace-page .workspace-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 48px;
+  align-items: center;
+  border-bottom: 1px solid var(--site-border);
+}
+
+.workspace-page .workspace-pin-button {
+  width: 36px;
+  min-height: 36px;
+  padding: 0;
+  justify-self: center;
+  color: var(--site-muted);
+  border-color: transparent;
+  background: transparent;
 }
 
 .workspace-page .workspace-list-row {
@@ -179,7 +218,6 @@
   min-height: 92px;
   padding-top: 20px;
   padding-bottom: 20px;
-  border-bottom: 1px solid var(--site-border);
   color: var(--site-text);
   text-decoration: none;
 }
@@ -441,6 +479,14 @@
     column-gap: 18px;
   }
 
+  .workspace-page .workspace-list-item {
+    grid-template-columns: minmax(0, 1fr) 40px;
+  }
+
+  .workspace-page .workspace-list-labels {
+    padding-right: 52px;
+  }
+
   .workspace-page .workspace-list-labels > :nth-child(4),
   .workspace-page .workspace-list-date,
   .workspace-page .workspace-list-open > span {
@@ -536,6 +582,13 @@
     grid-template-columns: auto 1fr 18px;
     gap: 15px 14px;
     padding: 20px 4px;
+  }
+
+  .workspace-page .workspace-pin-button {
+    align-self: start;
+    margin-top: 12px;
+    min-height: 40px;
+    width: 40px;
   }
 
   .workspace-page .workspace-list-project {

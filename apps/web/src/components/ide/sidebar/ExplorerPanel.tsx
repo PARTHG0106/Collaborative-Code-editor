@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
   Folder, File, FilePlus, FolderPlus, ChevronDown, ChevronRight,
-  Edit2, Trash2, Upload, FolderUp
+  Edit2, Trash2, Upload, FolderUp, Download, Loader2
 } from 'lucide-react';
 import { FileSystemItem } from '../hooks/useFileSystem';
 
@@ -16,11 +16,15 @@ interface ExplorerPanelProps {
   onCreateFile: (name: string, type: 'FILE' | 'FOLDER', parentId: string | null, content?: string) => Promise<any>;
   onRenameFile: (id: string, name: string) => void;
   onDeleteFile: (id: string) => void;
+  onDownloadWorkspace?: () => void;
+  onDownloadFile?: (id: string) => void;
+  downloading?: string | null;
 }
 
 export const ExplorerPanel: React.FC<ExplorerPanelProps> = ({
   files, filesLoading, activeFileId, expandedFolders, canModify,
-  onSelectFile, onToggleFolder, onCreateFile, onRenameFile, onDeleteFile
+  onSelectFile, onToggleFolder, onCreateFile, onRenameFile, onDeleteFile,
+  onDownloadWorkspace, onDownloadFile, downloading = null
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [newItemType, setNewItemType] = useState<'FILE' | 'FOLDER' | null>(null);
@@ -249,9 +253,14 @@ export const ExplorerPanel: React.FC<ExplorerPanelProps> = ({
               )}
             </div>
 
-            {canModify && renamingId !== item.id && (
+            {(canModify || (!isFolder && onDownloadFile)) && renamingId !== item.id && (
               <div className="ide-tree-node-actions" onClick={e => e.stopPropagation()}>
-                {isFolder && (
+                {!isFolder && onDownloadFile && (
+                  <button type="button" className="ide-icon-btn" title={`Download ${item.name}`} aria-label={`Download ${item.name}`} disabled={!!downloading || filesLoading} onClick={() => onDownloadFile(item.id)}>
+                    {downloading === item.id ? <Loader2 size={12} className="animate-spin" aria-hidden="true" /> : <Download size={12} aria-hidden="true" />}
+                  </button>
+                )}
+                {canModify && isFolder && (
                   <>
                     <button className="ide-icon-btn" title="New File" onClick={() => { onToggleFolder(item.id); startCreate('FILE', item.id); }}>
                       <FilePlus size={12} />
@@ -261,12 +270,12 @@ export const ExplorerPanel: React.FC<ExplorerPanelProps> = ({
                     </button>
                   </>
                 )}
-                <button className="ide-icon-btn" title="Rename" onClick={() => { setRenamingId(item.id); setRenamingName(item.name); }}>
+                {canModify && <button className="ide-icon-btn" title="Rename" onClick={() => { setRenamingId(item.id); setRenamingName(item.name); }}>
                   <Edit2 size={12} />
-                </button>
-                <button className="ide-icon-btn danger" title="Delete" onClick={() => { if (window.confirm('Delete this item?')) onDeleteFile(item.id); }}>
+                </button>}
+                {canModify && <button className="ide-icon-btn danger" title="Delete" onClick={() => { if (window.confirm('Delete this item?')) onDeleteFile(item.id); }}>
                   <Trash2 size={12} />
-                </button>
+                </button>}
               </div>
             )}
           </div>
@@ -286,8 +295,8 @@ export const ExplorerPanel: React.FC<ExplorerPanelProps> = ({
     <>
       <div className="ide-sidebar-header">
         <span className="ide-sidebar-title">Explorer</span>
-        {canModify && (
-          <div className="ide-sidebar-actions">
+        <div className="ide-sidebar-actions">
+          {canModify && <>
             <button className="ide-icon-btn" title="New File" onClick={() => startCreate('FILE', null)}>
               <FilePlus size={14} />
             </button>
@@ -300,8 +309,11 @@ export const ExplorerPanel: React.FC<ExplorerPanelProps> = ({
             <button className="ide-icon-btn" title="Upload Folder" onClick={handleFolderUpload}>
               <FolderUp size={14} />
             </button>
-          </div>
-        )}
+          </>}
+          {onDownloadWorkspace && <button type="button" className="ide-icon-btn" title="Download workspace ZIP, including current editor changes" aria-label="Download workspace ZIP" disabled={!!downloading || filesLoading} onClick={onDownloadWorkspace}>
+            {downloading === 'workspace' ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : <Download size={14} aria-hidden="true" />}
+          </button>}
+        </div>
       </div>
       <input 
         type="file" 

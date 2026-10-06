@@ -288,6 +288,26 @@
   background: var(--ide-hover);
 }
 
+.ide-icon-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
+.ide-download-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--ide-border);
+  background: var(--ide-sidebar);
+  color: var(--ide-text-secondary);
+  font-size: 12px;
+}
+
+.ide-download-notice.error { color: var(--ide-danger); }
+.ide-download-notice .ide-icon-btn { flex-shrink: 0; }
+
 .ide-icon-btn.danger:hover {
   color: var(--ide-danger);
 }
@@ -330,12 +350,21 @@
 }
 
 .ide-tree-node-actions {
-  display: none;
+  display: flex;
+  opacity: 0;
+  pointer-events: none;
+  flex-shrink: 0;
   gap: 1px;
 }
 
-.ide-tree-node:hover .ide-tree-node-actions {
-  display: flex;
+.ide-tree-node:hover .ide-tree-node-actions,
+.ide-tree-node:focus-within .ide-tree-node-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: none) {
+  .ide-tree-node-actions { opacity: 1; pointer-events: auto; }
 }
 
 .ide-tree-inline-input {

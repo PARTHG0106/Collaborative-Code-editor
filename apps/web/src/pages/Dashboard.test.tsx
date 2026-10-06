@@ -45,6 +45,7 @@ describe('Dashboard Workspace Flow', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    window.localStorage.clear();
     // Default implementation to avoid unhandled promise resolution warnings
     vi.mocked(apiClient.get).mockResolvedValue({
       data: { success: true, data: [] },
@@ -214,6 +215,71 @@ describe('Dashboard Workspace Flow', () => {
     expect(names()).toEqual(['Alpha API', 'Beta docs', 'Zebra UI']);
     fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'created' } });
     expect(names()).toEqual(['Beta docs', 'Alpha API', 'Zebra UI']);
+  });
+
+  it('pins without navigation and keeps pinned workspaces first within each sort order', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { success: true, data: workspaceFixtures } });
+    render(<Dashboard />);
+    await screen.findByRole('link', { name: 'Alpha API' });
+    const names = () => within(screen.getByRole('main')).getAllByRole('link').map((link) => within(link).getByRole('heading').textContent);
+    const pinAlpha = screen.getByRole('button', { name: 'Pin Alpha API' });
+    expect(pinAlpha.closest('a')).toBeNull();
+    expect(pinAlpha).toHaveAttribute('aria-pressed', 'false');
+    pinAlpha.focus();
+    expect(pinAlpha).toHaveFocus();
+    fireEvent.click(pinAlpha);
+    expect(screen.getByRole('button', { name: 'Unpin Alpha API' })).toHaveAttribute('aria-pressed', 'true');
+    expect(names()).toEqual(['Alpha API', 'Zebra UI', 'Beta docs']);
+    expect(mockNavigate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pin Zebra UI' }));
+    expect(names()).toEqual(['Zebra UI', 'Alpha API', 'Beta docs']);
+    fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'name' } });
+    expect(names()).toEqual(['Alpha API', 'Zebra UI', 'Beta docs']);
+    fireEvent.change(screen.getByLabelText('Sort by'), { target: { value: 'created' } });
+    expect(names()).toEqual(['Alpha API', 'Zebra UI', 'Beta docs']);
+    fireEvent.click(screen.getByRole('button', { name: 'Unpin Alpha API' }));
+    expect(names()).toEqual(['Zebra UI', 'Beta docs', 'Alpha API']);
+    expect(JSON.parse(window.localStorage.getItem('syncscript:pinned-workspaces:user-123')!)).toEqual(['zebra']);
+  });
+
+  it('combines the pinned filter with search and roles and clears all filters together', async () => {
+    window.localStorage.setItem('syncscript:pinned-workspaces:user-123', '["alpha", "zebra"]');
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { success: true, data: workspaceFixtures } });
+    render(<Dashboard />);
+    await screen.findByRole('link', { name: 'Alpha API' });
+    fireEvent.click(screen.getByRole('button', { name: 'Pinned only' }));
+    expect(screen.getByRole('button', { name: 'Pinned only' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('status')).toHaveTextContent('2 of 3 workspaces');
+    expect(screen.queryByRole('link', { name: 'Beta docs' })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'design' } });
+    expect(screen.getByRole('status')).toHaveTextContent('1 of 3 workspaces');
+    expect(screen.getByRole('link', { name: 'Zebra UI' })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Your role'), { target: { value: 'OWNER' } });
+    expect(screen.getByText('No matching workspaces')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    expect(screen.getByRole('searchbox')).toHaveValue('');
+    expect(screen.getByLabelText('Your role')).toHaveValue('ALL');
+    expect(screen.getByRole('button', { name: 'Pinned only' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('status')).toHaveTextContent('3 of 3 workspaces');
+  });
+
+  it('explains how to pin from an empty pinned view and reacts to another tab', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue({ data: { success: true, data: workspaceFixtures } });
+    render(<Dashboard />);
+    await screen.findByRole('link', { name: 'Alpha API' });
+    fireEvent.click(screen.getByRole('button', { name: 'Pinned only' }));
+    expect(screen.getByText('No pinned workspaces yet')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Show all workspaces' }));
+    expect(screen.getByRole('link', { name: 'Alpha API' })).toBeInTheDocument();
+
+    act(() => window.dispatchEvent(new StorageEvent('storage', { key: 'syncscript:pinned-workspaces:user-123', newValue: '["beta", "removed-workspace"]', storageArea: window.localStorage })));
+    expect(screen.getByRole('button', { name: 'Unpin Beta docs' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Pinned only' }));
+    expect(screen.getByRole('status')).toHaveTextContent('1 of 3 workspaces');
+    fireEvent.click(screen.getByRole('button', { name: 'Unpin Beta docs' }));
+    expect(screen.getByText('No pinned workspaces yet')).toBeInTheDocument();
   });
 
   it('shows a retryable load error without claiming the user has no workspaces', async () => {

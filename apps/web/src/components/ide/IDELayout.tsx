@@ -7,6 +7,7 @@ import { TopBar } from './TopBar';
 import { QuickOpen } from './QuickOpen';
 import { getFilePath } from './filePaths';
 import { useEditorPreferences } from './hooks/useEditorPreferences';
+import { useWorkspaceDownloads } from './hooks/useWorkspaceDownloads';
 import { ExplorerPanel } from './sidebar/ExplorerPanel';
 import { SearchPanel } from './sidebar/SearchPanel';
 import { CollaboratorsPanel } from './sidebar/CollaboratorsPanel';
@@ -194,6 +195,7 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
     if (fileId === activeFileIdRef.current) editorSourceRef.current = content;
     fs.setFiles(files => files.map(file => file.id === fileId && file.content !== content ? { ...file, content } : file));
   });
+  const downloads = useWorkspaceDownloads(workspaceId, workspace?.name || 'workspace', collaboration.getDownloadContents);
   const editorContent = collaboration.content;
   editorSourceRef.current = editorContent;
   const cursorSocketRef = useRef(ws.socket);
@@ -680,6 +682,10 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
         onToggleFocusMode={toggleFocusMode}
       />
       {(error || collaboration.error || ws.permissionError) && <div role="alert" style={{ padding: 8, color: 'var(--ide-danger)' }}>{error || collaboration.error || ws.permissionError}</div>}
+      {(downloads.downloading || downloads.error || downloads.notice) && <div className={`ide-download-notice${downloads.error ? ' error' : ''}`} role={downloads.error ? 'alert' : 'status'}>
+        <span>{downloads.downloading ? 'Preparing download with current editor changes…' : downloads.error || downloads.notice}</span>
+        {!downloads.downloading && <button type="button" className="ide-icon-btn" aria-label="Dismiss download message" onClick={downloads.dismissFeedback}><X size={14} aria-hidden="true" /></button>}
+      </div>}
       {collaboration.recoveries.map(draft => <div role="alert" key={`${draft.fileId}-${draft.id}`} style={{ padding: 8 }}>
         An unsynced copy was preserved. Download it to keep your changes.
         <button className="ide-btn" onClick={() => {
@@ -704,6 +710,9 @@ const IDEInner: React.FC<{ workspaceId: string; onBack: () => void }> = ({ works
               onToggleFolder={id => fs.setExpandedFolders(prev => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; })}
               onCreateFile={(name, type, parentId, content) => fs.createFile(name, type, parentId, content).then(item => { if (item && type === 'FILE') selectFile(item); return item; })}
               onRenameFile={fs.renameFile} onDeleteFile={fs.deleteFile}
+              onDownloadWorkspace={() => void downloads.downloadWorkspace()}
+              onDownloadFile={id => void downloads.downloadFile(id)}
+              downloading={downloads.downloading}
             />
           )}
           {activity === 'search' && <SearchPanel files={fs.files} onOpenFile={selectFile} />}
