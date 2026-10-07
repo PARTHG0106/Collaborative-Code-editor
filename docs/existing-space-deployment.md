@@ -70,6 +70,33 @@ before removing D1 configuration or deploying older code.
 
 ## GPU worker authentication
 
+The API selects GPU workers from its own `execution_workers` registry. A running
+Hugging Face Space is not automatically registered, and account GPU quota does
+not populate this registry. To use the existing worker, add this **variable** to
+`Parthg0106/syncscript-api` and restart/redeploy the API:
+
+```text
+HF_GPU_WORKER_URL=https://parthg0106-sync-script-gpu.hf.space
+```
+
+Only a direct HTTPS `*.hf.space` origin is accepted: no credentials, query,
+fragment, custom port, or path. This setting does not create a Space, change its
+hardware, or purchase GPU time. When it is unset, startup leaves the registry
+alone. When configured, startup creates a missing GPU row as `IDLE`; an existing
+row with an equivalent direct URL, Space page URL, or `owner/space` ID is reused
+unchanged. The account label on a new row is the Space hostname. Existing
+`BUSY` leases, cooldown heartbeats, and intentionally `OFFLINE` workers are never
+reset. Duplicate aliases or a conflicting non-GPU registration fail startup
+instead of merging live worker records. Invalid configuration and registration
+database errors also fail startup with a clear error.
+
+Verify the startup log: `GPU worker registry: registered (IDLE).` or
+`GPU worker registry: already present (BUSY).` (the actual state is shown).
+If an existing row is intentionally `OFFLINE`, an administrator must review and
+enable it separately. The editor now distinguishes a missing/disabled registry
+from workers that are busy or cooling down. These errors occur before any
+Hugging Face request and do not indicate quota exhaustion.
+
 The GPU Stop button aborts the API's pending submission/output requests and marks
 the session canceled; later output is discarded. Gradio's call endpoint does
 not terminate an already queued/running ZeroGPU process. A canceled or uncertain

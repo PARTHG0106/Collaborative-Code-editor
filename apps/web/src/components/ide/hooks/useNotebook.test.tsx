@@ -156,4 +156,15 @@ describe('notebook editing and execution state', () => {
     rerender(props);
     expect(result.current.inputText).toBe('Ada\nLondon');
   });
+
+  it('returns the inserted cell identity so keyboard navigation can focus it', () => {
+    const { result, onChange, rerender, props } = setup();
+    let id: string | undefined;
+    act(() => { id = result.current.addCell('b', 'code'); });
+    expect(id).toEqual(expect.any(String));
+    expect(parseNotebook(onChange.mock.calls.at(-1)![1]).at(-1)).toMatchObject({ id, type: 'code', source: '' });
+    rerender({ ...props, writable: false });
+    act(() => { id = result.current.addCell('b', 'code'); });
+    expect(id).toBeUndefined();
+  });
 });

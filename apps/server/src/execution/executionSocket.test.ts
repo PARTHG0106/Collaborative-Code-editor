@@ -8,7 +8,7 @@ import { runRemoteExecution } from './remoteExecution.js';
 vi.mock('../lib/prisma.js', () => ({ default: {
   fileSystemItem: { findUnique: vi.fn() },
   executionSession: { create: vi.fn(), update: vi.fn(), findUnique: vi.fn() },
-  executionWorker: { findFirst: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+  executionWorker: { findFirst: vi.fn(), findMany: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
 } }));
 vi.mock('../lib/socketAuthz.js', () => ({
   AuthzError: class AuthzError extends Error {},
@@ -50,6 +50,7 @@ describe('execution socket authorization and session lifecycle', () => {
     vi.mocked(prisma.executionSession.update).mockResolvedValue({} as never);
     vi.mocked(prisma.executionWorker.update).mockResolvedValue({} as never);
     vi.mocked(prisma.executionWorker.updateMany).mockResolvedValue({ count: 1 });
+    vi.mocked(prisma.executionWorker.findMany).mockResolvedValue([]);
     vi.mocked(runRemoteExecution).mockResolvedValue(0);
     socket = new Client();
     broadcast = vi.fn();
@@ -133,6 +134,19 @@ describe('execution socket authorization and session lifecycle', () => {
       expect(options?.redirect).toBe('error');
     }
     expect(broadcast).toHaveBeenCalledWith('exec:session-1', 'execution:stdout', expect.objectContaining({ data: '42\n' }));
+  });
+
+  it.each([
+    [[], 'No enabled GPU worker is configured'],
+    [[{ status: 'OFFLINE' }], 'No enabled GPU worker is configured'],
+    [[{ status: 'BUSY' }, { status: 'OFFLINE' }], 'GPU workers are busy or cooling down'],
+    [[{ status: 'IDLE' }], 'GPU worker availability changed'],
+  ])('explains unavailable registry state without claiming an HF quota failure: %j', async (workers, message) => {
+    vi.mocked(prisma.executionWorker.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.executionWorker.findMany).mockResolvedValue(workers as never);
+    await socket.receive('execution:start', { ...start, target: 'gpu-worker' });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(broadcast).toHaveBeenCalledWith('exec:session-1', 'execution:stderr', expect.objectContaining({ data: expect.stringContaining(message) }));
   });
 
   it.each(['post', 'stream', 'disconnect'])('aborts GPU %s requests, marks cancellation and keeps an uncertain worker reserved', async phase => {

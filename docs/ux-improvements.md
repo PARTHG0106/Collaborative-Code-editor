@@ -70,6 +70,10 @@ keyboard access, and the existing editor behavior remain available.
 - Open `.ipynb` files as editable cells. Run a cell or use **Run All**; Python
   variables remain available to later cells in that notebook during the current
   workspace visit. Different notebooks use separate variable namespaces.
+- **Ctrl/Cmd+Enter** runs the current code cell and keeps focus there.
+  **Shift+Enter** runs it and focuses the next cell, adding a code cell at the
+  end when needed. Markdown and raw cells advance without running Python.
+  Execution shortcuts are disabled while running or when editing is read-only.
 - Expression results, printed text, errors, and imported rich outputs are shown
   below their cells. Saves preserve notebook metadata, cell metadata, attachments,
   and raw cells. Invalid notebook JSON displays an error without replacing it.

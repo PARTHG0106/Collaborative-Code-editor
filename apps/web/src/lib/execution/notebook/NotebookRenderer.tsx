@@ -1,6 +1,6 @@
-import React, { useId, useState } from 'react';
+import React, { useCallback, useId, useRef, useState } from 'react';
 import { Play, Plus, Trash2, ChevronUp, ChevronDown, Square } from 'lucide-react';
-import Editor from '@monaco-editor/react';
+import Editor, { type OnMount } from '@monaco-editor/react';
 import DOMPurify from 'dompurify';
 
 export interface CellOutput {
@@ -29,7 +29,7 @@ interface NotebookRendererProps {
   onCellChange: (id: string, source: string) => void;
   onRunCell: (id: string) => void;
   onRunAll: () => void;
-  onAddCell: (afterId: string, type: 'code' | 'markdown') => void;
+  onAddCell: (afterId: string, type: 'code' | 'markdown') => string | void;
   onDeleteCell: (id: string) => void;
   onMoveCell: (id: string, direction: 'up' | 'down') => void;
   theme: 'dark' | 'light';
@@ -70,6 +70,60 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
   const [focusedCell, setFocusedCell] = useState<string | null>(null);
   const inputHelpId = useId();
   const busy = isExecuting || cells.some(cell => cell.isRunning);
+  const editors = useRef(new Map<string, Parameters<OnMount>[0]>());
+  const pendingFocus = useRef<string | null>(null);
+  const current = useRef({ cells, readOnly, busy, onRunCell, onAddCell });
+  current.current = { cells, readOnly, busy, onRunCell, onAddCell };
+
+  const focusCell = useCallback((id: string) => {
+    setFocusedCell(id);
+    pendingFocus.current = id;
+    const editor = editors.current.get(id);
+    if (editor) {
+      pendingFocus.current = null;
+      editor.getDomNode()?.scrollIntoView({ block: 'nearest' });
+      editor.focus();
+    }
+  }, []);
+
+  const runShortcut = useCallback((id: string, advance: boolean) => {
+    const state = current.current;
+    if (state.readOnly || state.busy) return;
+    const index = state.cells.findIndex(cell => cell.id === id);
+    if (index < 0) return;
+    if (state.cells[index].type === 'code') state.onRunCell(id);
+    if (!advance) return;
+    const next = state.cells[index + 1];
+    if (next) focusCell(next.id);
+    else {
+      const addedId = state.onAddCell(id, 'code');
+      if (addedId) focusCell(addedId);
+    }
+  }, [focusCell]);
+
+  const mountCell = useCallback((id: string, editor: Parameters<OnMount>[0], monaco: Parameters<OnMount>[1]) => {
+    editors.current.set(id, editor);
+    const actions = [
+      editor.addAction({
+        id: 'notebook.run-cell', label: 'Run cell',
+        keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter],
+        keybindingContext: 'editorTextFocus',
+        run: () => runShortcut(id, false),
+      }),
+      editor.addAction({
+        id: 'notebook.run-cell-and-advance', label: 'Run cell and select next',
+        keybindings: [monaco.KeyMod.Shift | monaco.KeyCode.Enter],
+        keybindingContext: 'editorTextFocus',
+        run: () => runShortcut(id, true),
+      }),
+      editor.onDidFocusEditorText(() => { pendingFocus.current = null; setFocusedCell(id); }),
+    ];
+    editor.onDidDispose(() => {
+      actions.forEach(action => action.dispose());
+      if (editors.current.get(id) === editor) editors.current.delete(id);
+    });
+    if (pendingFocus.current === id) focusCell(id);
+  }, [focusCell, runShortcut]);
 
   return (
     <div style={{
@@ -124,6 +178,10 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
         </details>
       </div>
 
+      <p style={{ margin: '-8px 0 12px', color: 'var(--ide-text-muted)', fontSize: '11px' }}>
+        Ctrl/⌘+Enter: run cell · Shift+Enter: run and select next
+      </p>
+
       {/* Cells */}
       {cells.length === 0 && (
         <div style={{ textAlign: 'center', padding: '40px', color: 'var(--ide-text-muted)' }}>
@@ -131,7 +189,7 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
         </div>
       )}
 
-      {cells.map(cell => (
+      {cells.map((cell, index) => (
         <div key={cell.id}
           onClick={() => setFocusedCell(cell.id)}
           style={{
@@ -158,6 +216,7 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
               <button className="ide-icon-btn" onClick={(e) => { e.stopPropagation(); onRunCell(cell.id); }}
                 disabled={readOnly || busy}
                 title="Run cell"
+                aria-keyshortcuts="Control+Enter Meta+Enter Shift+Enter"
                 style={{ marginRight: '4px', color: cell.isRunning ? 'var(--ide-accent)' : undefined }}>
                 {cell.isRunning ? <span style={{ animation: 'pulse 1s infinite' }}>⏳</span> : <Play size={12} />}
               </button>
@@ -181,10 +240,12 @@ export const NotebookRenderer: React.FC<NotebookRendererProps> = ({
               language={cell.type === 'code' ? 'python' : cell.type === 'raw' ? 'plaintext' : 'markdown'}
               theme={theme === 'dark' ? 'vs-dark' : 'vs'}
               value={cell.source}
+              onMount={(editor, monaco) => mountCell(cell.id, editor, monaco)}
               onChange={(val, event) => {
                 if (!readOnly && !event?.isFlush && !event?.isEolChange) onCellChange(cell.id, val || '');
               }}
               options={{
+                ariaLabel: `Notebook cell ${index + 1}`,
                 readOnly,
                 minimap: { enabled: false }, lineNumbers: 'off',
                 scrollBeyondLastLine: false, folding: false,

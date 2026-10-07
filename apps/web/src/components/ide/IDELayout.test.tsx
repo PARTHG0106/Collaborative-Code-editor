@@ -59,6 +59,9 @@ vi.mock('@monaco-editor/react', async () => {
         let cursorListener: ((event: any) => void) | null = null;
         const disposeListeners: Array<() => void> = [];
         const mount = () => !disposed && onMount?.({
+          addAction: () => ({ dispose: vi.fn() }),
+          onDidFocusEditorText: () => ({ dispose: vi.fn() }),
+          getDomNode: () => null,
           setPosition: (position: any) => { mocks.setPosition(position); cursorListener?.({ position, reason: 3 }); },
           revealLineInCenter: mocks.revealLineInCenter,
           focus: mocks.editorFocus,
@@ -79,7 +82,7 @@ vi.mock('@monaco-editor/react', async () => {
             return { dispose: () => { if (mocks.onCursor === listener) mocks.onCursor = null; cursorListener = null; } };
           },
           onDidDispose: (listener: () => void) => { disposeListeners.push(listener); },
-        }, { editor: { EndOfLineSequence: { LF: 0 } } });
+        }, { editor: { EndOfLineSequence: { LF: 0 } }, KeyMod: { CtrlCmd: 2048, Shift: 1024 }, KeyCode: { Enter: 3 } });
         mocks.mountEditor = mount;
         if (!mocks.deferEditorMount) mount();
         return () => { disposed = true; disposeListeners.forEach(listener => listener()); };

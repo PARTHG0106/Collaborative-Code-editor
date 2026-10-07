@@ -73,14 +73,17 @@ export function useNotebook(options: NotebookOptions) {
   }, [update]);
 
   const addCell = useCallback((afterId: string, type: 'code' | 'markdown') => {
+    let addedId: string | undefined;
     update(cells => {
       const result = [...cells];
       const index = cells.findIndex(cell => cell.id === afterId);
+      addedId = crypto.randomUUID();
       result.splice(index < 0 ? cells.length : index + 1, 0, {
-        id: crypto.randomUUID(), type, source: '', outputs: [], executionCount: null, isRunning: false,
+        id: addedId, type, source: '', outputs: [], executionCount: null, isRunning: false,
       });
       return result;
     });
+    return addedId;
   }, [update]);
 
   const deleteCell = useCallback((id: string) => update(cells => cells.filter(cell => cell.id !== id)), [update]);

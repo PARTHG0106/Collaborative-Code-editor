@@ -4,6 +4,7 @@ import { createApp } from './app.js';
 import { config, validateConfig } from './config/index.js';
 import prisma from './lib/prisma.js';
 import { initSocketServer } from './socket.js';
+import { registerConfiguredGpuWorker } from './execution/gpuWorkerRegistry.js';
 
 /**
  * Process-level error guards.
@@ -76,6 +77,7 @@ async function main(): Promise<void> {
     console.info('🔍 [CHECKPOINT 3] Testing Prisma $connect...');
     await prisma.$connect();
     console.info('✅ [CHECKPOINT 3] Prisma $connect works!');
+    await registerConfiguredGpuWorker(config.gpuWorkerUrl);
 
     // ──────────────────────────────────────────
     // CHECKPOINT 4: Prisma query (SELECT 1)

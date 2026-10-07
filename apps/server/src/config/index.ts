@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import { configuredGpuWorkerUrl } from '../execution/gpuWorkerUrl.js';
 
 // Single, explicit path to the monorepo root .env. In production the platform
 // injects real environment variables and this is a no-op.
@@ -93,6 +94,9 @@ export const config = {
   /** Public OAuth web client ID. An empty value leaves Google sign-in disabled. */
   googleClientId: process.env.GOOGLE_CLIENT_ID?.trim() || null,
 
+  /** Existing GPU Space to register on startup; no worker is provisioned. */
+  gpuWorkerUrl: process.env.HF_GPU_WORKER_URL?.trim() || null,
+
   /** JWT configuration settings */
   jwt: {
     accessSecret: requireSecret('JWT_ACCESS_SECRET'),
@@ -108,6 +112,7 @@ export const config = {
  * by requireSecret(), so this only covers the remaining configuration.
  */
 export function validateConfig(): void {
+  configuredGpuWorkerUrl(config.gpuWorkerUrl);
   const missing: string[] = [];
 
   const dbUrl = process.env.DATABASE_URL || '';

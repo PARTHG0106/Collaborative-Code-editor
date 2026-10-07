@@ -2,6 +2,8 @@ import { Server as SocketIOServer, Socket } from 'socket.io';
 import prisma from '../lib/prisma.js';
 import { registerTerminalGateway } from './terminalGateway.js';
 import { registerRemoteExecutionInput, runRemoteExecution } from './remoteExecution.js';
+import { normalizeSpaceUrl } from './gpuWorkerUrl.js';
+export { normalizeSpaceUrl } from './gpuWorkerUrl.js';
 import {
   AuthzError,
   READ_ROLES,
@@ -29,10 +31,6 @@ const STALE_MS = 2 * 60 * 1000;
 const GPU_COOLDOWN_MS = 3 * 60 * 1000;
 const GPU_LEASE_MS = 5 * 60 * 1000;
 
-/** Scheme and suffix for a Hugging Face Space direct API host. */
-const SCHEME = 'https://';
-const SPACE_HOST_SUFFIX = '.hf.space';
-
 async function limitedResponseText(response: Response, maximum: number): Promise<string> {
   if (!response.body) return '';
   const reader = response.body.getReader();
@@ -51,43 +49,6 @@ async function limitedResponseText(response: Response, maximum: number): Promise
     }
     return Buffer.concat(chunks).toString('utf8');
   } finally { reader.releaseLock(); }
-}
-
-/**
- * Accepts the URL shapes people actually store for a Space and returns an
- * origin we can call.
- *
- *   "owner/space"                      -> the direct owner-space API host
- *   a huggingface.co/spaces/o/s page    -> the direct o-s API host
- *   an already-direct host              -> unchanged, trailing slash removed
- *
- * A Space *page* URL or a trailing slash produces the same "Could not resolve
- * app config." failure, so normalize rather than trust whatever is in the DB.
- */
-export function normalizeSpaceUrl(raw: string): string {
-  const value = (raw || '').trim().replace(/\/+$/, '');
-  if (!value) throw new Error('GPU worker has no URL configured.');
-
-  const asSlug = (owner: string, space: string): string => {
-    const host = (owner + '-' + space).toLowerCase().replace(/[^a-z0-9-]/g, '-');
-    return SCHEME + host + SPACE_HOST_SUFFIX;
-  };
-
-  const hfPage = value.match(/^https?:\/\/huggingface\.co\/spaces\/([^/]+)\/([^/]+)/i);
-  if (hfPage) return asSlug(hfPage[1], hfPage[2]);
-
-  if (/^https?:\/\//i.test(value)) {
-    const parsed = new URL(value);
-    if (parsed.protocol !== 'https:' || !/^[a-z0-9-]+\.hf\.space$/.test(parsed.hostname) || parsed.port || parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== '/') {
-      throw new Error('GPU worker must use an HTTPS Hugging Face Space origin.');
-    }
-    return parsed.origin;
-  }
-
-  const slug = value.match(/^([^/\s]+)\/([^/\s]+)$/);
-  if (slug) return asSlug(slug[1], slug[2]);
-
-  throw new Error(`Unrecognized GPU worker URL: ${value}`);
 }
 
 /**
@@ -318,7 +279,10 @@ export function registerExecutionHandlers(io: SocketIOServer, socket: Socket) {
             });
 
             if (!worker) {
-              throw new Error('No GPU workers currently available. Please try again later.');
+              const registered = await prisma.executionWorker.findMany({ where: { type: 'GPU' }, select: { status: true } });
+              if (registered.some(item => item.status === 'IDLE')) throw new Error('GPU worker availability changed. Please try again.');
+              if (registered.some(item => item.status === 'BUSY')) throw new Error('GPU workers are busy or cooling down. Please try again shortly.');
+              throw new Error('No enabled GPU worker is configured. Ask the administrator to configure HF_GPU_WORKER_URL or enable an existing worker.');
             }
             if (cancelledPending || !socket.connected) controller.abort();
             controller.signal.throwIfAborted();
