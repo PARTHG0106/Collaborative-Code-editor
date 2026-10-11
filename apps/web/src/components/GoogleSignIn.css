@@ -5,6 +5,9 @@
 .google-sign-in-button {
   width: 100%;
   min-height: 40px;
+  /* Match Google's iframe canvas so its transparent padding stays transparent.
+     The button's dark/light appearance is controlled by the GIS theme option. */
+  color-scheme: light;
 }
 
 .google-sign-in-button[aria-disabled="true"] {
