@@ -1,4 +1,5 @@
 import React from 'react';
+import { flushSync } from 'react-dom';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPanel } from './SettingsPanel';
@@ -18,6 +19,29 @@ function props(overrides: Partial<React.ComponentProps<typeof SettingsPanel>> = 
 
 describe('SettingsPanel', () => {
   beforeEach(() => localStorage.clear());
+
+  it('opens editable fields without submitting when React commits during the Edit click', async () => {
+    const onSave = vi.fn().mockResolvedValue(true);
+    render(<SettingsPanel {...props({ onSave })} />);
+
+    // Native activation runs after React's click handler in a browser. Flush at
+    // that boundary so jsdom catches an Edit button reused as a submit button.
+    document.addEventListener('click', () => flushSync(() => {}), { once: true });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Saving...' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Workspace Name')).toBeEnabled();
+    expect(screen.getByLabelText('Workspace Name')).toHaveFocus();
+    expect(screen.getByLabelText('Description')).toBeEnabled();
+
+    fireEvent.change(screen.getByLabelText('Workspace Name'), { target: { value: 'Edited project' } });
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'Edited description' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByRole('button', { name: 'Edit' });
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith('Edited project', 'Edited description');
+  });
 
   it('lets viewers personalize their editor, persists preferences, and restores defaults', () => {
     function ViewerSettings() {

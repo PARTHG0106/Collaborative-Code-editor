@@ -31,7 +31,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     wasEditingRef.current = editing;
   }, [editing]);
 
-  const startEditing = () => {
+  const startEditing = (event: React.MouseEvent<HTMLButtonElement>) => {
+    // React can reuse this node for Save before the browser activates the click.
+    // Cancel that activation so entering edit mode cannot submit the form.
+    event.preventDefault();
     setName(workspace.name);
     setDesc(workspace.description || '');
     setSaveError(null);
