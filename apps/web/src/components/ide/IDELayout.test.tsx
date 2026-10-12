@@ -185,6 +185,12 @@ describe('IDE collaborative editing', () => {
 
   const edits = () => socket.emit.mock.calls.filter(([event]) => event === 'edit_file');
 
+  // Await the model-restoration frame itself rather than racing waitFor's
+  // one-second polling deadline while CI is busy with other workspaces.
+  async function nextEditorFrame() {
+    await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
+  }
+
   function saveSession(overrides: Partial<EditorSession> = {}, userId = 'self') {
     const session: EditorSession = {
       version: 1, openFileIds: ['beta', 'alpha'], activeFileId: 'alpha',
@@ -314,15 +320,18 @@ describe('IDE collaborative editing', () => {
     mocks.deferEditorMount = true;
     files = [file('alpha', 'header\nneedle\nfooter')];
     saveSession({ openFileIds: ['alpha'], positions: { alpha: { lineNumber: 3, column: 4 } } });
-    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
-    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    await act(async () => { render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />); });
+    expect(screen.getByRole('button', { name: 'Close alpha.ts' })).toBeInTheDocument();
+    expect(socket.emit).toHaveBeenCalledWith('join_file', { fileId: 'alpha' });
+    expect(mocks.mountEditor).toEqual(expect.any(Function));
     fireEvent.keyDown(window, { key: 'F', ctrlKey: true, shiftKey: true });
     fireEvent.change(screen.getByRole('textbox', { name: 'Search file contents' }), { target: { value: 'needle' } });
     fireEvent.click(await screen.findByRole('button', { name: 'alpha.ts, line 2: needle' }));
     act(() => { socket.receive('file_init', { fileId: 'alpha', content: files[0].content, version: 0 }); });
     expect(mocks.setPosition).not.toHaveBeenCalled();
-    act(() => { mocks.mountEditor?.(); });
-    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 1 }));
+    act(() => { mocks.mountEditor!(); });
+    await nextEditorFrame();
+    expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 1 });
     expect(mocks.setPosition).toHaveBeenCalledTimes(1);
     expect(mocks.editorFocus).toHaveBeenCalled();
     act(() => { window.dispatchEvent(new Event('pagehide')); });
@@ -332,11 +341,14 @@ describe('IDE collaborative editing', () => {
   it('restores a saved cursor after a delayed mount without an explicit navigation request', async () => {
     mocks.deferEditorMount = true;
     saveSession();
-    render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />);
-    await screen.findByRole('button', { name: 'Close alpha.ts' });
+    await act(async () => { render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />); });
+    expect(screen.getByRole('button', { name: 'Close alpha.ts' })).toBeInTheDocument();
+    expect(socket.emit).toHaveBeenCalledWith('join_file', { fileId: 'alpha' });
+    expect(mocks.mountEditor).toEqual(expect.any(Function));
     act(() => { socket.receive('file_init', { fileId: 'alpha', content: 'first\nsecond', version: 0 }); });
-    act(() => { mocks.mountEditor?.(); });
-    await waitFor(() => expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 3 }));
+    act(() => { mocks.mountEditor!(); });
+    await nextEditorFrame();
+    expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 2, column: 3 });
     expect(mocks.editorFocus).not.toHaveBeenCalled();
   });
 
@@ -345,12 +357,6 @@ describe('IDE collaborative editing', () => {
     let view!: ReturnType<typeof render>;
     await act(async () => { view = render(<IDELayout workspaceId="workspace" onBack={vi.fn()} />); });
     expect(socket.emit).toHaveBeenCalledWith('join_file', { fileId: 'alpha' });
-    // Cursor restoration runs after Monaco receives the synchronized model.
-    // Wait for that frame explicitly instead of racing waitFor's 1s deadline
-    // when CI is also compiling and testing the server.
-    const nextEditorFrame = async () => {
-      await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => resolve())); });
-    };
     act(() => { socket.receive('file_init', { fileId: 'alpha', content: 'live alpha', version: 0 }); });
     await nextEditorFrame();
     expect(mocks.setPosition).toHaveBeenCalledWith({ lineNumber: 1, column: 3 });
